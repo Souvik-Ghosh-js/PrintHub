@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ vendor.shop_name }} — PrintHub</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', system-ui, sans-serif; margin: 0;
+           background: #f2f4f8; color: #1c2333; }
+    header { background: #1c2a6e; color: #fff; padding: 14px 20px; }
+    header h1 { margin: 0; font-size: 1.2rem; }
+    header small { opacity: .8; }
+    main { max-width: 760px; margin: 20px auto; padding: 0 12px 60px; }
+    .card { background: #fff; border-radius: 10px; padding: 18px;
+            margin-bottom: 16px; box-shadow: 0 1px 4px rgba(20,30,80,.08); }
+    h2 { font-size: 1.02rem; margin: 0 0 12px; color: #1c2a6e; }
+    .tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+    .tabs button { flex: 1; min-width: 110px; padding: 10px 6px; border: 1.5px solid #ccd3ea;
+                   background: #fff; border-radius: 8px; cursor: pointer; font-size: .92rem; }
+    .tabs button.active { background: #1c2a6e; color: #fff; border-color: #1c2a6e; }
+
+    /* Page slots — wireframe layouts (spec §1) */
+    .slots { display: flex; gap: 14px; justify-content: center; align-items: center;
+             min-height: 190px; padding: 14px; background: #eef1f8;
+             border-radius: 10px; }
+    .slots.stacked { flex-direction: column; }
+    .slot { position: relative; width: 220px; height: 150px; background: #fff;
+            border: 1.5px dashed #9aa7d6; border-radius: 8px; display: flex;
+            align-items: center; justify-content: center; overflow: hidden;
+            cursor: pointer; }
+    .slots.stacked .slot { width: 300px; height: 130px; }
+    .slot img { max-width: 100%; max-height: 100%; }
+    .slot .hint { color: #6a76a8; font-size: .85rem; text-align: center; padding: 8px; }
+    .slot .del { position: absolute; top: 4px; left: 4px; width: 24px; height: 24px;
+                 border-radius: 50%; border: none; background: #d63333; color: #fff;
+                 font-weight: bold; cursor: pointer; display: none; line-height: 1; }
+    .slot.filled { border-style: solid; border-color: #d63333; }
+    .slot.filled .del { display: block; }
+
+    .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center;
+           margin: 10px 0; }
+    label { font-size: .9rem; }
+    select, input[type=number], input[type=text] {
+      padding: 8px; border: 1px solid #ccd3ea; border-radius: 6px; font-size: .92rem; }
+    .price { font-size: 1.25rem; font-weight: 700; color: #1c2a6e; }
+    .actions button { padding: 12px 22px; border: none; border-radius: 8px;
+                      font-size: 1rem; cursor: pointer; }
+    #preview-btn { background: #e8ebf7; color: #1c2a6e; }
+    #order-btn { background: #1c8a3c; color: #fff; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+
+    /* Crop modal */
+    #crop-modal { position: fixed; inset: 0; background: rgba(15,20,40,.75);
+                  display: none; align-items: center; justify-content: center; z-index: 50; }
+    #crop-modal .box { background: #fff; border-radius: 10px; padding: 14px;
+                       width: min(680px, 94vw); }
+    #crop-stage { max-height: 55vh; }
+    #crop-img { max-width: 100%; display: block; }
+    #crop-detect-note { font-size: .82rem; color: #5a6491; min-height: 1.2em; margin: 6px 0; }
+    #doc-pages { display: flex; gap: 10px; flex-wrap: wrap; }
+    #doc-pages .slot { width: 130px; height: 170px; }
+    .muted { color: #6a76a8; font-size: .85rem; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>{{ vendor.shop_name }}</h1>
+  <small>Scan &amp; print — B/W ₹{{ '%.2f' % vendor.price_bw }}/page ·
+         Colour ₹{{ '%.2f' % vendor.price_colour }}/page</small>
+</header>
+<main>
+  <div class="card">
+    <h2>1 · Choose document type</h2>
+    <div class="tabs" id="format-tabs">
+      {% for key, fmt in formats.items() %}
+      <button data-format="{{ key }}" data-layout="{{ fmt.layout }}">{{ fmt.label }}</button>
+      {% endfor %}
+      <button data-format="document" data-layout="pages">Document scan</button>
+    </div>
+  </div>
+
+  <div class="card" id="id-panel">
+    <h2>2 · Add pages <span class="muted" id="layout-note"></span></h2>
+    <div class="slots" id="id-slots">
+      <div class="slot" id="slot-front" data-side="front">
+        <button class="del" title="Delete page">✕</button>
+        <span class="hint">Page 1 (Front)<br>tap to scan</span>
+      </div>
+      <div class="slot" id="slot-back" data-side="back">
+        <button class="del" title="Delete page">✕</button>
+        <span class="hint">Page 2 (Back)<br>tap to scan</span>
+      </div>
+    </div>
+    <p class="muted">Each page has its own ✕ — deleting one auto-centres the
+      remaining page. A single page prints centred on the sheet.</p>
+  </div>
+
+  <div class="card" id="doc-panel" style="display:none;">
+    <h2>2 · Add pages</h2>
+    <div id="doc-pages"></div>
+    <p><button type="button" id="add-page-btn">＋ Add page</button></p>
+  </div>
+
+  <div class="card">
+    <h2>3 · Enhance &amp; options</h2>
+    <div class="row">
+      <label>Light / Burn filter
+        <select id="enhance-mode">
+          <option value="none">Original</option>
+          <option value="color">Enhanced colour (shadow removal)</option>
+          <option value="gray">Grayscale scan</option>
+          <option value="bw">B&amp;W scan</option>
+        </select>
+      </label>
+      <label>Print
+        <select id="color-mode">
+          <option value="bw">Black &amp; White</option>
+          <option value="color">Colour</option>
+        </select>
+      </label>
+      <label>Copies <input type="number" id="copies" value="1" min="1" max="50" style="width:70px"></label>
+    </div>
+    <div class="row">
+      <label>Your name <input type="text" id="customer-name" placeholder="For the shop counter"></label>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between;">
+      <div>Total: <span class="price" id="price">₹0.00</span>
+        <span class="muted" id="price-note"></span></div>
+      <div class="actions">
+        <button type="button" id="preview-btn">Preview PDF</button>
+        <button type="button" id="order-btn" disabled>Place order</button>
+      </div>
+    </div>
+    <p class="muted" id="order-result"></p>
+  </div>
+</main>
+
+<!-- Crop editor: AI auto-cut pre-fills the box; drag handles to fine-tune -->
+<div id="crop-modal">
+  <div class="box">
+    <h2 style="margin-top:0;">Adjust the crop</h2>
+    <div id="crop-stage"><img id="crop-img" alt=""></div>
+    <div id="crop-detect-note">Detecting document…</div>
+    <div class="row" style="justify-content:flex-end;">
+      <button type="button" id="crop-cancel">Cancel</button>
+      <button type="button" id="crop-done" style="background:#1c2a6e;color:#fff;">Use this crop</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="file-input" accept="image/*" style="display:none;">
+
+<script>
+  const PRICES = { bw: {{ vendor.price_bw }}, color: {{ vendor.price_colour }} };
+  const SHOP = "{{ vendor.shop_code }}";
+
+  const state = {
+    format: "aadhaar", layout: "side_by_side",
+    sides: { front: null, back: null },   // {blob, url} — cropped originals
+    pages: [],                            // document mode
+  };
+
+  // ---------- format tabs ----------
+  const tabs = document.querySelectorAll("#format-tabs button");
+  tabs.forEach(btn => btn.addEventListener("click", () => {
+    tabs.forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    state.format = btn.dataset.format;
+    state.layout = btn.dataset.layout;
+    const isDoc = state.format === "document";
+    document.getElementById("id-panel").style.display = isDoc ? "none" : "block";
+    document.getElementById("doc-panel").style.display = isDoc ? "block" : "none";
+    const slots = document.getElementById("id-slots");
+    slots.classList.toggle("stacked", state.layout === "stacked");
+    document.getElementById("layout-note").textContent =
+      state.layout === "stacked" ? "(front above, back below)"
+      : state.layout === "side_by_side" ? "(front and back side by side)" : "";
+    updatePrice();
+  }));
+  tabs[0].click();
+
+  // ---------- crop editor with AI auto-cut ----------
+  let cropper = null, cropCallback = null;
+  const modal = document.getElementById("crop-modal");
+  const cropImg = document.getElementById("crop-img");
+  const detectNote = document.getElementById("crop-detect-note");
+
+  const MAX_DIM = 1400;      // downscale huge phone photos (prototype fix)
+  function downscale(dataUrl) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        let { width: w, height: h } = img;
+        if (w <= MAX_DIM && h <= MAX_DIM) return resolve(dataUrl);
+        const s = MAX_DIM / Math.max(w, h);
+        const c = document.createElement("canvas");
+        c.width = Math.round(w * s); c.height = Math.round(h * s);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        resolve(c.toDataURL("image/jpeg", 0.9));
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  }
+
+  // Server-side auto-detect (ML model with classical-CV fallback); logs the
+  // source in the console. Failure => keep Cropper.js's default box.
+  async function autoDetect(dataUrl) {
+    try {
+      const blob = await (await fetch(dataUrl)).blob();
+      const fd = new FormData();
+      fd.append("file", blob, "page.jpg");
+      const r = await fetch("/api/detect_document", { method: "POST", body: fd });
+      const d = await r.json();
+      if (d.ok && Array.isArray(d.corners)) {
+        const xs = d.corners.map(c => c[0]), ys = d.corners.map(c => c[1]);
+        const x = Math.max(0, Math.min(...xs)), y = Math.max(0, Math.min(...ys));
+        cropper.setData({ x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y });
+        const src = d.detector === "ml" ? "ML model" : "classical CV fallback";
+        console.log(`[auto-cut] crop box from ${src} (confidence ${d.confidence})`);
+        detectNote.textContent = `Auto-cut by ${src} — drag the handles to fine-tune.`;
+      } else {
+        console.log(`[auto-cut] skipped (${d.reason || "unknown"}) — using Cropper.js default box`);
+        detectNote.textContent = "Could not auto-detect — adjust the box manually.";
+      }
+    } catch (err) {
+      console.log("[auto-cut] failed — using Cropper.js default box", err);
+      detectNote.textContent = "Auto-detect unavailable — adjust the box manually.";
+    }
+  }
+
+  function openCropper(file, callback) {
+    cropCallback = callback;
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const dataUrl = await downscale(e.target.result);
+      cropImg.src = dataUrl;
+      modal.style.display = "flex";
+      detectNote.textContent = "Detecting document…";
+      if (cropper) cropper.destroy();
+      cropper = new Cropper(cropImg, {
+        viewMode: 0, autoCropArea: 0.8, background: false,
+        movable: true, zoomable: false, rotatable: true,
+        ready() { autoDetect(dataUrl); },
+      });
+    };
+    reader.readAsDataURL(file);
+  }
+
+  document.getElementById("crop-cancel").addEventListener("click", () => {
+    modal.style.display = "none";
+    if (cropper) { cropper.destroy(); cropper = null; }
+  });
+
+  document.getElementById("crop-done").addEventListener("click", () => {
+    if (!cropper) return;
+    cropper.getCroppedCanvas({ maxWidth: 1400, maxHeight: 1400,
+                               imageSmoothingQuality: "high" })
+      .toBlob((blob) => {
+        modal.style.display = "none";
+        cropper.destroy(); cropper = null;
+        if (blob && cropCallback) cropCallback({ blob, url: URL.createObjectURL(blob) });
+      }, "image/jpeg", 0.92);
+  });
+
+  // ---------- ID slots (front/back with per-page delete + auto-centre) ----------
+  const fileInput = document.getElementById("file-input");
+  let pendingTarget = null;   // "front" | "back" | "newpage"
+
+  function pickFile(target) {
+    pendingTarget = target;
+    fileInput.value = "";
+    fileInput.click();
+  }
+
+  fileInput.addEventListener("change", () => {
+    const f = fileInput.files[0];
+    if (!f) return;
+    openCropper(f, (page) => {
+      if (pendingTarget === "newpage") {
+        state.pages.push(page);
+        renderDocPages();
+      } else {
+        state.sides[pendingTarget] = page;
+        renderSlot(pendingTarget);
+      }
+      updatePrice();
+    });
+  });
+
+  function renderSlot(side) {
+    const slot = document.getElementById("slot-" + side);
+    const page = state.sides[side];
+    const hint = slot.querySelector(".hint");
+    let img = slot.querySelector("img");
+    if (page) {
+      slot.classList.add("filled");
+      hint.style.display = "none";
+      if (!img) { img = document.createElement("img"); slot.appendChild(img); }
+      img.src = page.url;
+    } else {
+      slot.classList.remove("filled");
+      hint.style.display = "";
+      if (img) img.remove();
+    }
+    // Auto-centre: hide an empty slot only if the OTHER side is filled
+    // (spec §2 — remaining page moves to the centre of the frame).
+    const other = side === "front" ? "back" : "front";
+    slot.style.display = (!page && state.sides[other]) ? "none" : "flex";
+    const otherSlot = document.getElementById("slot-" + other);
+    otherSlot.style.display = (!state.sides[other] && page) ? "none" : "flex";
+  }
+
+  ["front", "back"].forEach(side => {
+    const slot = document.getElementById("slot-" + side);
+    slot.addEventListener("click", (e) => {
+      if (e.target.classList.contains("del")) return;
+      pickFile(side);
+    });
+    slot.querySelector(".del").addEventListener("click", () => {
+      state.sides[side] = null;
+      renderSlot(side); renderSlot(side === "front" ? "back" : "front");
+      updatePrice();
+    });
+  });
+
+  // ---------- document mode pages ----------
+  document.getElementById("add-page-btn")
+    .addEventListener("click", () => pickFile("newpage"));
+
+  function renderDocPages() {
+    const wrap = document.getElementById("doc-pages");
+    wrap.innerHTML = "";
+    state.pages.forEach((p, i) => {
+      const div = document.createElement("div");
+      div.className = "slot filled";
+      div.innerHTML = `<button class="del">✕</button><img src="${p.url}">`;
+      div.querySelector(".del").addEventListener("click", () => {
+        state.pages.splice(i, 1);
+        renderDocPages(); updatePrice();
+      });
+      wrap.appendChild(div);
+    });
+  }
+
+  // ---------- price + submit ----------
+  function pageCount() {
+    if (state.format === "document") return state.pages.length;
+    return (state.sides.front || state.sides.back) ? 1 : 0;
+  }
+
+  function updatePrice() {
+    const mode = document.getElementById("color-mode").value;
+    const copies = Math.max(1, +document.getElementById("copies").value || 1);
+    const pages = pageCount();
+    const total = PRICES[mode] * pages * copies;
+    document.getElementById("price").textContent = "₹" + total.toFixed(2);
+    document.getElementById("price-note").textContent =
+      pages ? `(${pages} page${pages > 1 ? "s" : ""} × ${copies} cop${copies > 1 ? "ies" : "y"})` : "";
+    document.getElementById("order-btn").disabled = pages === 0;
+  }
+  document.getElementById("color-mode").addEventListener("change", updatePrice);
+  document.getElementById("copies").addEventListener("input", updatePrice);
+
+  function buildForm() {
+    const fd = new FormData();
+    fd.append("doc_format", state.format);
+    fd.append("enhance_mode", document.getElementById("enhance-mode").value);
+    fd.append("color_mode", document.getElementById("color-mode").value);
+    fd.append("copies", document.getElementById("copies").value || "1");
+    fd.append("customer_name", document.getElementById("customer-name").value);
+    if (state.format === "document") {
+      state.pages.forEach((p, i) => fd.append("pages", p.blob, `page${i + 1}.jpg`));
+    } else {
+      if (state.sides.front) fd.append("front", state.sides.front.blob, "front.jpg");
+      if (state.sides.back) fd.append("back", state.sides.back.blob, "back.jpg");
+    }
+    return fd;
+  }
+
+  document.getElementById("preview-btn").addEventListener("click", async () => {
+    if (pageCount() === 0) { alert("Add at least one page first."); return; }
+    const r = await fetch(`/shop/${SHOP}/preview`, { method: "POST", body: buildForm() });
+    if (!r.ok) { alert("Preview failed."); return; }
+    window.open(URL.createObjectURL(await r.blob()), "_blank");
+  });
+
+  document.getElementById("order-btn").addEventListener("click", async () => {
+    const btn = document.getElementById("order-btn");
+    btn.disabled = true; btn.textContent = "Placing…";
+    try {
+      const r = await fetch(`/shop/${SHOP}/order`, { method: "POST", body: buildForm() });
+      const d = await r.json();
+      if (d.ok) {
+        document.getElementById("order-result").textContent =
+          `✅ Order #${d.job_id} placed — pay ₹${d.price.toFixed(2)} at the counter. ` +
+          `The shop is printing it now.`;
+      } else {
+        document.getElementById("order-result").textContent =
+          "❌ " + (d.error || "Order failed.");
+      }
+    } catch (e) {
+      document.getElementById("order-result").textContent = "❌ Network error.";
+    } finally {
+      btn.disabled = false; btn.textContent = "Place order";
+      updatePrice();
+    }
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+flask
+PyMySQL
+pillow
+numpy
+opencv-python
+onnxruntime
+pymupdf
+requests
+gunicorn

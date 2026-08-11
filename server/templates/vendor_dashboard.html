@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ vendor.shop_name }} — Vendor dashboard</title>
+  <style>
+    body { font-family: 'Segoe UI', system-ui, sans-serif; margin: 0;
+           background: #f2f4f8; color: #1c2333; }
+    header { background: #1c2a6e; color: #fff; padding: 14px 20px;
+             display: flex; justify-content: space-between; align-items: center; }
+    header h1 { margin: 0; font-size: 1.15rem; }
+    header a { color: #cfd6f5; font-size: .9rem; }
+    main { max-width: 900px; margin: 20px auto; padding: 0 12px 60px; }
+    .card { background: #fff; border-radius: 10px; padding: 18px;
+            margin-bottom: 16px; box-shadow: 0 1px 4px rgba(20,30,80,.08); }
+    h2 { font-size: 1rem; color: #1c2a6e; margin: 0 0 12px; }
+    table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+    th, td { padding: 7px 8px; border-bottom: 1px solid #e4e8f4; text-align: left; }
+    th { background: #eef1f8; color: #1c2a6e; }
+    .badge { padding: 2px 10px; border-radius: 12px; font-size: .8rem; color: #fff; }
+    .active { background: #1c8a3c; } .grace { background: #c78a00; }
+    .suspended, .rejected { background: #b32020; } .pending_payment { background: #667; }
+    input[type=number] { padding: 8px; border: 1px solid #ccd3ea; border-radius: 6px; width: 110px; }
+    button { padding: 9px 16px; background: #1c2a6e; color: #fff; border: none;
+             border-radius: 6px; cursor: pointer; }
+    .flash { color: #1c8a3c; font-size: .9rem; }
+    .muted { color: #6a76a8; font-size: .87rem; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<header>
+  <h1>{{ vendor.shop_name }}</h1>
+  <div>
+    <a href="{{ url_for('shop', code=vendor.shop_code) }}" target="_blank">Customer page ↗</a> ·
+    <a href="{{ url_for('vendor_logout') }}">Log out</a>
+  </div>
+</header>
+<main>
+  {% with messages = get_flashed_messages() %}
+    {% for m in messages %}<p class="flash">{{ m }}</p>{% endfor %}
+  {% endwith %}
+
+  <div class="grid">
+    <div class="card">
+      <h2>Subscription</h2>
+      <p>Plan: <strong>{{ plans[vendor.plan].label }}</strong> —
+         <span class="badge {{ vendor.status }}">{{ vendor.status.replace('_',' ') }}</span></p>
+      {% if vendor.plan != 'lifetime' and vendor.renews_at %}
+        <p class="muted">Renews: {{ vendor.renews_at }}</p>
+        {% if vendor.status == 'grace' %}
+          <p class="muted">⚠ Grace period until {{ vendor.grace_until }} —
+             renew to avoid suspension.</p>
+        {% endif %}
+      {% elif vendor.plan == 'lifetime' %}
+        <p class="muted">Lifetime access — no recurring charges.</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h2>Your printing prices (per page)</h2>
+      <form method="post" action="{{ url_for('vendor_pricing') }}">
+        <p><label>Black &amp; White ₹
+          <input type="number" name="price_bw" step="0.5" min="0"
+                 value="{{ '%.2f' % vendor.price_bw }}"></label></p>
+        <p><label>Colour ₹
+          <input type="number" name="price_colour" step="0.5" min="0"
+                 value="{{ '%.2f' % vendor.price_colour }}"></label></p>
+        <button type="submit">Save prices</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Printer configuration <span class="muted">(managed from the desktop
+      worker app — “Change Printer” there updates this)</span></h2>
+    <table>
+      <tr><th>Mode</th><td>{{ 'Multiple printers (B/W + Colour)' if vendor.printer_mode == 'multi' else 'Single printer' }}</td></tr>
+      {% if vendor.printer_mode == 'multi' %}
+      <tr><th>B/W printer</th><td>{{ vendor.printer_bw or '—' }}
+          <span class="muted">tray: {{ vendor.tray_bw or 'auto' }}</span></td></tr>
+      <tr><th>Colour printer</th><td>{{ vendor.printer_colour or '—' }}
+          <span class="muted">tray: {{ vendor.tray_colour or 'auto' }}</span></td></tr>
+      {% else %}
+      <tr><th>Printer</th><td>{{ vendor.printer_single or '—' }}
+          <span class="muted">tray: {{ vendor.tray_single or 'auto' }}</span></td></tr>
+      {% endif %}
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Recent print jobs</h2>
+    <table>
+      <tr><th>#</th><th>Document</th><th>Customer</th><th>Mode</th>
+          <th>Copies</th><th>Price</th><th>Status</th><th>Created</th></tr>
+      {% for j in jobs %}
+      <tr>
+        <td>{{ j.id }}</td><td>{{ j.original_filename }}</td>
+        <td>{{ j.customer_name or '—' }}</td><td>{{ j.color_mode }}</td>
+        <td>{{ j.copies }}</td><td>₹{{ '%.2f' % j.price }}</td>
+        <td>{{ j.status }}</td><td class="muted">{{ j.created_at }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="muted">No jobs yet.</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Your payments</h2>
+    <table>
+      <tr><th>Date</th><th>Type</th><th>Plan</th><th>Amount</th><th>Method</th></tr>
+      {% for p in payments %}
+      <tr><td class="muted">{{ p.created_at }}</td><td>{{ p.kind }}</td>
+          <td>{{ p.plan or '—' }}</td><td>₹{{ '%.2f' % p.amount }}</td>
+          <td>{{ p.method }}</td></tr>
+      {% else %}
+      <tr><td colspan="5" class="muted">No payments recorded.</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+</main>
+</body>
+</html>
