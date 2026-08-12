@@ -6,6 +6,7 @@
   <title>{{ vendor.shop_name }} — PrintHub</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"></script>
+  {% if online_pay %}<script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>{% endif %}
   <style>
     * { box-sizing: border-box; }
     body { font-family: 'Segoe UI', system-ui, sans-serif; margin: 0;
@@ -63,6 +64,26 @@
     #doc-pages { display: flex; gap: 10px; flex-wrap: wrap; }
     #doc-pages .slot { width: 130px; height: 170px; }
     .muted { color: #6a76a8; font-size: .85rem; }
+
+    /* ---------- mobile (the page customers reach by scanning the QR) ---------- */
+    @media (max-width: 520px) {
+      main { margin: 12px auto; padding: 0 8px 40px; }
+      .card { padding: 14px; }
+      /* Two ID slots must fit side by side on a ~360px screen. */
+      .slots { gap: 8px; padding: 10px; }
+      .slot { width: 42vw; max-width: 220px; height: auto; aspect-ratio: 22/15; }
+      .slots.stacked .slot { width: 78vw; max-width: 300px; aspect-ratio: 30/13; }
+      #doc-pages .slot { width: 28vw; height: auto; aspect-ratio: 13/17; }
+      /* 16px stops iOS Safari from auto-zooming into focused fields. */
+      select, input[type=number], input[type=text] { font-size: 16px; }
+      .row { gap: 10px; }
+      .row label { flex: 1 1 100%; }
+      .actions { display: flex; gap: 8px; width: 100%; }
+      .actions button { flex: 1; padding: 12px 8px; }
+      .price { font-size: 1.15rem; }
+      #crop-modal .box { padding: 10px; }
+      #crop-stage { max-height: 48vh; }
+    }
   </style>
 </head>
 <body>
@@ -125,6 +146,14 @@
     </div>
     <div class="row">
       <label>Your name <input type="text" id="customer-name" placeholder="For the shop counter"></label>
+      {% if online_pay %}
+      <label>Payment
+        <select id="pay-mode">
+          <option value="online">Pay online (UPI / card)</option>
+          <option value="counter">Pay at the counter</option>
+        </select>
+      </label>
+      {% endif %}
     </div>
   </div>
 
@@ -368,8 +397,12 @@
   document.getElementById("color-mode").addEventListener("change", updatePrice);
   document.getElementById("copies").addEventListener("input", updatePrice);
 
+  const ONLINE_PAY = {{ 'true' if online_pay else 'false' }};
+
   function buildForm() {
     const fd = new FormData();
+    const payModeSel = document.getElementById("pay-mode");
+    fd.append("pay_mode", (ONLINE_PAY && payModeSel) ? payModeSel.value : "counter");
     fd.append("doc_format", state.format);
     fd.append("enhance_mode", document.getElementById("enhance-mode").value);
     fd.append("color_mode", document.getElementById("color-mode").value);
@@ -391,22 +424,55 @@
     window.open(URL.createObjectURL(await r.blob()), "_blank");
   });
 
+  // Online payment: open the Cashfree checkout (this SHOP's own Cashfree
+  // account) and poll the server until the payment is confirmed.
+  let payPoll = null;
+  function startPaymentPolling(orderId, jobId, price) {
+    const out = document.getElementById("order-result");
+    if (payPoll) clearInterval(payPoll);
+    let ticks = 0;
+    payPoll = setInterval(async () => {
+      ticks++;
+      try {
+        const r = await fetch(`/shop/${SHOP}/payment-status/${orderId}`);
+        const d = await r.json();
+        if (d.status === "paid") {
+          clearInterval(payPoll); payPoll = null;
+          out.textContent = `✅ Payment received — order #${jobId} ` +
+            `(₹${price.toFixed(2)}) is printing now.`;
+        } else if (d.status === "failed") {
+          clearInterval(payPoll); payPoll = null;
+          out.textContent = `❌ Payment failed for order #${jobId}. ` +
+            `You can pay ₹${price.toFixed(2)} at the counter instead.`;
+        }
+      } catch (e) { /* transient network error — keep polling */ }
+      if (ticks > 100) { clearInterval(payPoll); payPoll = null; }
+    }, 3000);
+  }
+
   document.getElementById("order-btn").addEventListener("click", async () => {
     const btn = document.getElementById("order-btn");
+    const out = document.getElementById("order-result");
     btn.disabled = true; btn.textContent = "Placing…";
     try {
       const r = await fetch(`/shop/${SHOP}/order`, { method: "POST", body: buildForm() });
       const d = await r.json();
-      if (d.ok) {
-        document.getElementById("order-result").textContent =
+      if (d.ok && d.pay_mode === "online") {
+        out.textContent = `Order #${d.job_id} created — complete the ` +
+          `₹${d.price.toFixed(2)} payment to start printing.`;
+        const cf = new Cashfree({ mode: d.cf_env });
+        cf.checkout({ paymentSessionId: d.payment_session_id,
+                      redirectTarget: "_modal" });
+        startPaymentPolling(d.order_id, d.job_id, d.price);
+      } else if (d.ok) {
+        out.textContent =
           `✅ Order #${d.job_id} placed — pay ₹${d.price.toFixed(2)} at the counter. ` +
-          `The shop is printing it now.`;
+          `The shop is printing it now.` + (d.note ? ` (${d.note})` : "");
       } else {
-        document.getElementById("order-result").textContent =
-          "❌ " + (d.error || "Order failed.");
+        out.textContent = "❌ " + (d.error || "Order failed.");
       }
     } catch (e) {
-      document.getElementById("order-result").textContent = "❌ Network error.";
+      out.textContent = "❌ Network error.";
     } finally {
       btn.disabled = false; btn.textContent = "Place order";
       updatePrice();

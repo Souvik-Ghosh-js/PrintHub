@@ -6,4 +6,5 @@ opencv-python
 onnxruntime
 pymupdf
 requests
+qrcode
 gunicorn

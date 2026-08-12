@@ -13,7 +13,14 @@
     header a { color: #cfd6f5; font-size: .9rem; }
     main { max-width: 900px; margin: 20px auto; padding: 0 12px 60px; }
     .card { background: #fff; border-radius: 10px; padding: 18px;
-            margin-bottom: 16px; box-shadow: 0 1px 4px rgba(20,30,80,.08); }
+            margin-bottom: 16px; box-shadow: 0 1px 4px rgba(20,30,80,.08);
+            overflow-x: auto; }   /* wide tables scroll on phones */
+    @media (max-width: 520px) {
+      main { margin: 12px auto; padding: 0 8px 40px; }
+      .card { padding: 14px; }
+      input[type=number], input[type=text], input[type=password], select {
+        font-size: 16px; }        /* no iOS zoom-on-focus */
+    }
     h2 { font-size: 1rem; color: #1c2a6e; margin: 0 0 12px; }
     table { width: 100%; border-collapse: collapse; font-size: .88rem; }
     th, td { padding: 7px 8px; border-bottom: 1px solid #e4e8f4; text-align: left; }
@@ -54,6 +61,11 @@
           <p class="muted">⚠ Grace period until {{ vendor.grace_until }} —
              renew to avoid suspension.</p>
         {% endif %}
+        <form method="post" action="{{ url_for('vendor_renew_online') }}">
+          <button type="submit">Renew online — ₹{{ plans[vendor.plan].fee }}</button>
+        </form>
+        <p class="muted">Renewal is the plan fee only; the installation fee is
+          never charged again.</p>
       {% elif vendor.plan == 'lifetime' %}
         <p class="muted">Lifetime access — no recurring charges.</p>
       {% endif %}
@@ -71,6 +83,70 @@
         <button type="submit">Save prices</button>
       </form>
     </div>
+  </div>
+
+  <div class="card">
+    <h2>Your shop QR code
+      <span class="muted">— customers scan this at the counter, no login
+        needed: it opens your upload &amp; pay page</span></h2>
+    <div style="display:flex; gap:20px; align-items:center; flex-wrap:wrap;">
+      <img src="{{ url_for('shop_qr_png', vendor_id=vendor.id) }}"
+           alt="Shop QR" style="width:150px; image-rendering:pixelated;
+           border:6px solid #1c2a6e; border-radius:10px;">
+      <div>
+        <p class="muted">Your shop link:
+          <code>{{ request.url_root.rstrip('/') }}/{{ vendor.shop_code }}</code></p>
+        <p>
+          <a href="{{ url_for('shop_qr_poster', vendor_id=vendor.id) }}"
+             target="_blank"><button type="button">🖨 Print counter poster</button></a>
+          &nbsp;
+          <a href="{{ url_for('shop_qr_png', vendor_id=vendor.id) }}"
+             download="printhub-qr-{{ vendor.shop_code }}.png">Download PNG</a>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Your Cashfree account
+      <span class="muted">— every shop uses its OWN account; customer print
+        payments go directly to you</span></h2>
+    <form method="post" action="{{ url_for('vendor_cashfree') }}">
+      <p><label>App ID<br>
+        <input type="text" name="cashfree_app_id" style="width:min(420px,100%);"
+               value="{{ vendor.cashfree_app_id or '' }}"></label></p>
+      <p><label>Secret key<br>
+        <input type="password" name="cashfree_secret_key" style="width:min(420px,100%);"
+               placeholder="{{ '•••••••• (saved — leave blank to keep)' if vendor.cashfree_secret_key else 'not set' }}"></label></p>
+      <p><label>Webhook secret<br>
+        <input type="password" name="cashfree_webhook_secret" style="width:min(420px,100%);"
+               placeholder="{{ '•••••••• (saved — leave blank to keep)' if vendor.cashfree_webhook_secret else 'not set' }}"></label></p>
+      <p><label>Environment
+        <select name="cashfree_env">
+          <option value="production" {% if vendor.cashfree_env != 'sandbox' %}selected{% endif %}>Production</option>
+          <option value="sandbox" {% if vendor.cashfree_env == 'sandbox' %}selected{% endif %}>Sandbox</option>
+        </select></label></p>
+      <p class="muted">In your Cashfree dashboard, set the webhook URL to
+        <code>{{ request.url_root.rstrip('/') }}/payment/webhook/vendor</code>.
+        {% if vendor.cashfree_app_id %}✓ Online payment is enabled on your
+        customer page.{% else %}Until keys are saved, customers pay at the
+        counter.{% endif %}</p>
+      <button type="submit">Save Cashfree account</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Shop-PC worker app</h2>
+    <p class="muted">One app for every shop — install it on the printing PC,
+      log in with your PrintHub Login ID &amp; Password, and it prints paid
+      jobs automatically. It remembers your login, reconnects after reboots,
+      and printers can be changed anytime without reinstalling.</p>
+    {% if worker_exe %}
+      <p><a href="{{ url_for('download_worker') }}"><button type="button">⬇ Download PrintHubWorker.exe</button></a></p>
+    {% else %}
+      <p class="muted">Download not available yet — ask the administrator for
+        the PrintHubWorker.exe installer.</p>
+    {% endif %}
   </div>
 
   <div class="card">

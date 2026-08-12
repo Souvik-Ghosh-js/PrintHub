@@ -81,6 +81,9 @@ CREATE TABLE IF NOT EXISTS vendors (
     printer_mode TEXT NOT NULL DEFAULT 'single',
     printer_single TEXT, tray_single TEXT,
     printer_bw TEXT, tray_bw TEXT, printer_colour TEXT, tray_colour TEXT,
+    cashfree_app_id TEXT, cashfree_secret_key TEXT,
+    cashfree_webhook_secret TEXT,
+    cashfree_env TEXT NOT NULL DEFAULT 'production',
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS payments (
@@ -104,15 +107,45 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     orientation TEXT DEFAULT 'portrait', color_mode TEXT DEFAULT 'bw',
     paper_size TEXT DEFAULT 'A4', price REAL DEFAULT 0,
     payment_status TEXT NOT NULL DEFAULT 'counter', copies INTEGER DEFAULT 1,
+    order_id TEXT, transaction_id TEXT, paid_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE TABLE IF NOT EXISTS gateway_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id TEXT NOT NULL UNIQUE,
+    vendor_id INTEGER,
+    purpose TEXT NOT NULL,          -- first_payment | renewal | print_job
+    amount REAL NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',   -- pending | paid | failed
+    transaction_id TEXT,
+    meta TEXT,                      -- one-time payload (e.g. generated creds)
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 """
+
+# Columns added after the first release — applied idempotently so an existing
+# SQLite file (or a fresh one) always ends up with the full schema.
+_SQLITE_MIGRATIONS = [
+    "ALTER TABLE vendors ADD COLUMN cashfree_app_id TEXT",
+    "ALTER TABLE vendors ADD COLUMN cashfree_secret_key TEXT",
+    "ALTER TABLE vendors ADD COLUMN cashfree_webhook_secret TEXT",
+    "ALTER TABLE vendors ADD COLUMN cashfree_env TEXT NOT NULL DEFAULT 'production'",
+    "ALTER TABLE print_jobs ADD COLUMN order_id TEXT",
+    "ALTER TABLE print_jobs ADD COLUMN transaction_id TEXT",
+    "ALTER TABLE print_jobs ADD COLUMN paid_at TEXT",
+    "ALTER TABLE gateway_orders ADD COLUMN meta TEXT",
+]
 
 
 def _init_sqlite():
     conn = sqlite3.connect(SQLITE_PATH)
     try:
         conn.executescript(_SQLITE_DDL)
+        for mig in _SQLITE_MIGRATIONS:
+            try:
+                conn.execute(mig)
+            except sqlite3.OperationalError:
+                pass  # column already exists
         conn.commit()
     finally:
         conn.close()
@@ -273,6 +306,20 @@ def get_job(job_id):
     return rows[0] if rows else None
 
 
+def get_jobs_by_order(order_id):
+    return query("SELECT * FROM print_jobs WHERE order_id = %s", (order_id,))
+
+
+def update_jobs_by_order(order_id, fields):
+    if not fields:
+        return 0
+    sets = ", ".join(f"{k} = %s" for k in fields)
+    rowcount, _ = execute(
+        f"UPDATE print_jobs SET {sets} WHERE order_id = %s",
+        tuple(fields.values()) + (order_id,))
+    return rowcount
+
+
 def get_vendor_jobs(vendor_id, status=None, limit=100):
     if status:
         return query(
@@ -281,6 +328,28 @@ def get_vendor_jobs(vendor_id, status=None, limit=100):
     return query(
         "SELECT * FROM print_jobs WHERE vendor_id = %s "
         "ORDER BY created_at DESC LIMIT %s", (vendor_id, limit))
+
+
+# ---------------------------------------------------------------------------
+# Gateway orders (one row per Cashfree order; drives webhook/return dispatch)
+# ---------------------------------------------------------------------------
+def insert_gateway_order(payload):
+    return _insert("gateway_orders", payload)
+
+
+def get_gateway_order(order_id):
+    rows = query("SELECT * FROM gateway_orders WHERE order_id = %s", (order_id,))
+    return rows[0] if rows else None
+
+
+def update_gateway_order(order_id, fields):
+    if not fields:
+        return 0
+    sets = ", ".join(f"{k} = %s" for k in fields)
+    rowcount, _ = execute(
+        f"UPDATE gateway_orders SET {sets} WHERE order_id = %s",
+        tuple(fields.values()) + (order_id,))
+    return rowcount
 
 
 # ---------------------------------------------------------------------------

@@ -48,6 +48,13 @@ CREATE TABLE IF NOT EXISTS vendors (
     printer_colour  VARCHAR(255),
     tray_colour     VARCHAR(128),
 
+    -- Per-vendor Cashfree account — EVERY SITE HAS A DIFFERENT ACCOUNT.
+    -- Customer print-job payments for this shop go through these keys.
+    cashfree_app_id         VARCHAR(128),
+    cashfree_secret_key     VARCHAR(128),
+    cashfree_webhook_secret VARCHAR(128),
+    cashfree_env            VARCHAR(16) NOT NULL DEFAULT 'production',  -- production|sandbox
+
     created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uq_shop_code (shop_code),
@@ -109,8 +116,41 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     price              DECIMAL(10,2) DEFAULT 0.00,
     payment_status     VARCHAR(32)  NOT NULL DEFAULT 'counter',   -- counter|paid|pending
     copies             INT          DEFAULT 1,
+    order_id           VARCHAR(128),         -- Cashfree order (online payments)
+    transaction_id     VARCHAR(128),
+    paid_at            DATETIME,
     created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     KEY idx_vendor_status (vendor_id, status),
+    KEY idx_order (order_id),
     KEY idx_storage (storage_key(191))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------
+-- Gateway orders — one row per Cashfree order (both the platform
+-- account and each vendor's own account); drives webhook dispatch.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS gateway_orders (
+    id             BIGINT        NOT NULL AUTO_INCREMENT,
+    order_id       VARCHAR(128)  NOT NULL,
+    vendor_id      BIGINT,
+    purpose        VARCHAR(24)   NOT NULL,   -- first_payment|renewal|print_job
+    amount         DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    status         VARCHAR(16)   NOT NULL DEFAULT 'pending',  -- pending|paid|failed
+    transaction_id VARCHAR(128),
+    meta           TEXT,          -- one-time payload (e.g. generated creds)
+    created_at     DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_order (order_id),
+    KEY idx_vendor (vendor_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Migration for a deployment created before the Cashfree integration:
+--   ALTER TABLE vendors
+--     ADD COLUMN cashfree_app_id VARCHAR(128),
+--     ADD COLUMN cashfree_secret_key VARCHAR(128),
+--     ADD COLUMN cashfree_webhook_secret VARCHAR(128),
+--     ADD COLUMN cashfree_env VARCHAR(16) NOT NULL DEFAULT 'production';
+--   ALTER TABLE print_jobs
+--     ADD COLUMN order_id VARCHAR(128), ADD COLUMN transaction_id VARCHAR(128),
+--     ADD COLUMN paid_at DATETIME, ADD KEY idx_order (order_id);

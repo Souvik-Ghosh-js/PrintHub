@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+server/.venv/
+server/printhub.sqlite
+server/uploads/
+worker/build/
+worker/dist/
+server/downloads/
+*.spec.bak
+.claude/

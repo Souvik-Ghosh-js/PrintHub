@@ -26,7 +26,7 @@
   {% if error %}<p class="err">{{ error }}</p>{% endif %}
   <h2 style="font-size:1.05rem;">Choose a print shop</h2>
   {% for v in shops %}
-  <a class="shop card" href="{{ url_for('shop', code=v.shop_code) }}">
+  <a class="shop card" href="/{{ v.shop_code }}">
     <strong>{{ v.shop_name }}</strong>
     <div class="muted">B/W ₹{{ '%.2f' % v.price_bw }}/page ·
       Colour ₹{{ '%.2f' % v.price_colour }}/page</div>

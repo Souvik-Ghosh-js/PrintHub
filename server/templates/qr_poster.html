@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QR poster — {{ vendor.shop_name }}</title>
+  <style>
+    body { font-family: 'Segoe UI', system-ui, sans-serif; margin: 0;
+           background: #f2f4f8; color: #1c2333; }
+    .toolbar { padding: 12px 20px; background: #10163a; color: #fff;
+               display: flex; justify-content: space-between; align-items: center; }
+    .toolbar button { padding: 9px 18px; background: #1c8a3c; color: #fff;
+                      border: none; border-radius: 6px; cursor: pointer;
+                      font-size: .95rem; }
+    .toolbar a { color: #cfd6f5; font-size: .9rem; }
+
+    /* The poster itself — sized to print nicely on one A4 portrait page */
+    .poster { background: #fff; width: min(680px, 94vw); margin: 24px auto;
+              padding: 48px 40px; border-radius: 12px; text-align: center;
+              box-shadow: 0 2px 10px rgba(20,30,80,.12); }
+    .poster h1 { color: #1c2a6e; font-size: 2rem; margin: 0 0 4px; }
+    .poster .tag { color: #6a76a8; font-size: 1.05rem; margin-bottom: 28px; }
+    .poster img.qr { width: min(380px, 80%); image-rendering: pixelated;
+                     border: 10px solid #1c2a6e; border-radius: 14px; }
+    .poster .scan { font-size: 1.5rem; font-weight: 700; color: #1c2a6e;
+                    margin: 26px 0 6px; }
+    .poster .steps { color: #3a4470; font-size: 1.02rem; line-height: 1.7;
+                     margin: 0 auto; max-width: 420px; text-align: left; }
+    .poster .url { margin-top: 24px; color: #6a76a8; font-size: .85rem;
+                   word-break: break-all; }
+    .poster .brand { margin-top: 18px; color: #9aa3c8; font-size: .8rem; }
+
+    @media print {
+      .toolbar { display: none; }
+      body { background: #fff; }
+      .poster { box-shadow: none; margin: 0 auto; border-radius: 0;
+                width: auto; }
+    }
+  </style>
+</head>
+<body>
+<div class="toolbar">
+  <span>QR poster for {{ vendor.shop_name }} ({{ vendor.shop_code }})</span>
+  <span>
+    <a href="/qr/{{ vendor.id }}.png" download="printhub-qr-{{ vendor.shop_code }}.png">Download PNG</a>
+    &nbsp;
+    <button onclick="window.print()">🖨 Print poster</button>
+  </span>
+</div>
+
+<div class="poster">
+  <h1>{{ vendor.shop_name }}</h1>
+  <div class="tag">Document printing — no login needed</div>
+  <img class="qr" src="/qr/{{ vendor.id }}.png" alt="Scan to print">
+  <div class="scan">📱 Scan to print</div>
+  <div class="steps">
+    1. Scan the QR with your phone camera<br>
+    2. Photograph your document — Aadhaar, PAN, Voter ID or any pages<br>
+    3. It's auto-cropped &amp; enhanced; choose B/W or colour and copies<br>
+    4. Pay on your phone {{ '(UPI / card)' if vendor.cashfree_app_id else 'at the counter' }} — printing starts automatically
+  </div>
+  <div class="url">{{ shop_url }}</div>
+  <div class="brand">Powered by PrintHub</div>
+</div>
+</body>
+</html>

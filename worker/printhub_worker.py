@@ -16,6 +16,7 @@ Printer configuration (spec §7):
 Printing/confirmation logic is ported from the working prototype
 (printer/printer/worker_app.py). Package with PyInstaller (see build_exe.bat).
 """
+import json
 import os
 import time
 import threading
@@ -36,6 +37,29 @@ POLL_SECONDS = 10
 PRINT_CONFIRM_TIMEOUT = 120
 
 AUTO_TRAY_LABEL = "Auto (printer default)"
+
+# One build serves EVERY vendor: identity comes from the login, and this
+# local file remembers the shop's server URL + session so the app reconnects
+# by itself after a restart/reboot.
+CONFIG_PATH = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")),
+                           "PrintHub", "worker.json")
+
+
+def load_local_config():
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_local_config(cfg: dict):
+    try:
+        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+    except OSError as e:
+        print(f"[config] could not save {CONFIG_PATH}: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -257,6 +281,16 @@ def api_fetch_jobs():
     return r.json().get("jobs", [])
 
 
+def api_resume(base_url, token):
+    """Validate a saved token and fetch the current session context
+    (shop name + printer config) without re-entering the password."""
+    r = requests.get(f"{base_url}/worker/api/jobs",
+                     params={"token": token}, timeout=15)
+    if r.status_code != 200:
+        return None
+    return r.json()
+
+
 def api_mark_printed(job_id):
     r = requests.post(f"{SESSION.base_url}/worker/api/jobs/{job_id}/printed",
                       params={"token": SESSION.token}, timeout=30)
@@ -406,10 +440,30 @@ class App(tk.Tk):
         self.main_frame = ttk.Frame(self)
         self._build_login()
         self._build_main()
-        self.login_frame.pack(fill="both", expand=True)
 
         self.after(200, self._drain_queue)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Try to resume the previous session (saved token) — the shop PC
+        # reboots shouldn't require retyping anything.
+        cfg = load_local_config()
+        if cfg.get("server"):
+            self.server_var.set(cfg["server"])
+        if cfg.get("login_id"):
+            self.login_var.set(cfg["login_id"])
+        resumed = False
+        if cfg.get("server") and cfg.get("token"):
+            try:
+                data = api_resume(cfg["server"], cfg["token"])
+            except Exception:
+                data = None
+            if data is not None:
+                data["token"] = cfg["token"]
+                data.setdefault("shop_name", cfg.get("shop_name", ""))
+                self._enter_main(cfg["server"], data, resumed=True)
+                resumed = True
+        if not resumed:
+            self.login_frame.pack(fill="both", expand=True)
 
     # ---------------- login screen ----------------
     def _build_login(self):
@@ -440,6 +494,15 @@ class App(tk.Tk):
             messagebox.showerror("Login failed", f"Could not reach the server:\n{e}")
             return
 
+        # Remember the session so the next launch reconnects automatically.
+        save_local_config({"server": base,
+                           "login_id": self.login_var.get().strip(),
+                           "token": data["token"],
+                           "shop_name": data.get("shop_name", "")})
+        self._enter_main(base, data)
+
+    def _enter_main(self, base, data, resumed=False):
+        """Shared by fresh login and token resume."""
         SESSION.base_url = base
         SESSION.token = data["token"]
         SESSION.shop_name = data.get("shop_name", "")
@@ -458,11 +521,26 @@ class App(tk.Tk):
         self.main_frame.pack(fill="both", expand=True)
         self._load_printer_ui()
         self.status_lbl.config(text="●  stopped (click Start)", foreground="red")
-        self._append_log(f"Logged in as {SESSION.shop_name}. "
-                         f"Configure printers, then click Start.")
+        if resumed:
+            self._append_log(f"Reconnected as {SESSION.shop_name} "
+                             f"(saved session). Click Start.")
+        else:
+            self._append_log(f"Logged in as {SESSION.shop_name}. "
+                             f"Configure printers, then click Start.")
         if data.get("status") == "grace":
             self._append_log("⚠️ Subscription is in the GRACE period — renew "
                              "soon to avoid suspension.")
+
+    def _do_logout(self):
+        """Forget the saved session and return to the login screen."""
+        self.stop()
+        cfg = load_local_config()
+        cfg.pop("token", None)
+        save_local_config(cfg)
+        SESSION.token = None
+        self.title("PrintHub Worker")
+        self.main_frame.pack_forget()
+        self.login_frame.pack(fill="both", expand=True)
 
     # ---------------- main screen ----------------
     def _build_main(self):
@@ -475,6 +553,8 @@ class App(tk.Tk):
         self.status_lbl.pack(side="left", padx=15)
         self.start_btn = ttk.Button(top, text="Start", command=self.toggle)
         self.start_btn.pack(side="right")
+        ttk.Button(top, text="Log out",
+                   command=self._do_logout).pack(side="right", padx=8)
 
         # --- Printer configuration (spec §7) ---
         cfgf = ttk.LabelFrame(f, text="Printer configuration", padding=10)

@@ -37,18 +37,13 @@ pip install -r requirements.txt
 python app.py                        # http://127.0.0.1:5000
 ```
 
-### Production (MySQL)
-```bash
-cd server
-mysql -u root -p < schema.sql        # creates the `printhub` database
-# create the app DB user, set PRINTHUB_DB_* env vars (or edit db.py)
-PRINTHUB_DB=mysql python app.py      # require MySQL (no SQLite fallback)
-```
-
-Change before deploying: `config.SECRET_KEY`, `config.ADMIN_PASSWORD`,
-DB credentials in `db.py` (env vars `PRINTHUB_DB_*`), `PRINTHUB_BASE_URL`.
-Production: `gunicorn -w 2 -b 0.0.0.0:8000 app:app` behind HTTPS (the
-prototype's `deploy_setup.sh` / `setup_https.sh` apply nearly unchanged).
+### Production (Lightsail — MySQL + nginx + systemd)
+See **[docs/DEPLOY.md](docs/DEPLOY.md)**. Short version: upload the repo to
+the instance, then `bash deploy/setup.sh` — it installs MySQL, creates the
+DB + app user, generates secrets into `/etc/printhub.env`, and runs the app
+behind nginx on port 80 (no domain needed to start). When the domain is
+connected: `DOMAIN=… EMAIL=… bash deploy/setup_https.sh`. Redeploys:
+`bash deploy/redeploy.sh`.
 
 ### First-run walkthrough
 1. `/admin/login` (credentials in `config.py`) → register a vendor with a plan.
@@ -58,7 +53,11 @@ prototype's `deploy_setup.sh` / `setup_https.sh` apply nearly unchanged).
 4. On the shop PC: run the worker app, log in with the same credentials,
    choose Single or Multiple (B/W + Colour) printers + trays, **Save / Change
    Printer**, then **Start**.
-5. Customers open `/shop/<code>` → pick Aadhaar / PAN / Voter / Document scan
+5. Hand the vendor their **counter QR poster** (admin panel → "QR poster",
+   also on the vendor dashboard). The QR encodes the vendor's short branded
+   URL on our domain — `https://<PRINTHUB_BASE_URL>/<shop_code>`, e.g.
+   `mohiniprintshop.org/vendor2` — customers scan it, no login needed.
+6. Customers land on that page → pick Aadhaar / PAN / Voter / Document scan
    → photos are auto-cropped by the ML model (Cropper.js manual fine-tune,
    with console logging of model vs fallback) → optional Light/Burn filter →
    place order → the worker prints it on the right printer automatically.
@@ -71,15 +70,43 @@ pip install -r requirements.txt
 python printhub_worker.py            # or build_exe.bat for a standalone .exe
 ```
 
+**One build serves every vendor** — the app is generic; identity comes from
+the vendor's login (Login ID + Password → the server returns that vendor's
+token and printer config). It saves the session in
+`%APPDATA%\PrintHub\worker.json`, auto-reconnects on the next launch, and
+has a Log out button to switch shops. Distribute it by uploading the built
+`PrintHubWorker.exe` to `server/downloads/` on the server — vendors then get
+a download button on their dashboard (`/download/worker`).
+
+## Payments (Cashfree — every site has a DIFFERENT account)
+
+Two kinds of Cashfree accounts, handled by `server/cashfree.py`:
+
+1. **Each vendor's OWN account** — customer print-job payments for a shop go
+   through that shop's keys, saved by the vendor on their dashboard
+   (App ID / secret / webhook secret / env, stored per vendor row). When keys
+   are saved, the customer page offers "Pay online"; the job reaches the
+   worker only after the payment succeeds (falls back to pay-at-counter if
+   the gateway declines to create the order). Vendors point their Cashfree
+   webhook at `…/payment/webhook/vendor` — the server resolves the vendor
+   from the order and verifies against *that vendor's* webhook secret. The
+   customer page also polls `…/payment-status/<order>`, which double-checks
+   with Cashfree directly, so payments confirm even without a reachable
+   webhook (local testing).
+2. **The platform account** (GOBT's own; `PLATFORM_CASHFREE_*` env vars or
+   `config.py`) — vendor subscription money. Registering a vendor produces a
+   public pay link `/pay/onboard/<shop_code>` for the first combined payment
+   (plan fee + ₹2,000 installation); on success the auto-generated
+   credentials are shown ONCE to the vendor (spec §6.4). Renewals: "Renew
+   online" on the vendor dashboard (plan fee only). Platform webhook URL:
+   `…/payment/webhook/platform`. Manual recording in the admin panel remains
+   as a fallback for cash/bank-transfer vendors.
+
 ## Deliberate v1 simplifications
-- **Payments are recorded, not collected**: subscription amounts follow the
-  spec exactly, but the admin records them manually. The prototype's working
-  Cashfree integration can be wired into `billing.record_first_payment` /
-  `record_renewal_payment` via webhook without touching the lifecycle logic.
-  Customer print jobs are "pay at the counter".
-- **Autopay** is modeled (renewal amounts, due dates, grace, suspension) but
-  charges are not initiated automatically — a gateway mandate/e-NACH
-  integration slots into the same two functions.
+- **Autopay** is modeled (renewal amounts, due dates, grace, suspension) and
+  renewals are one-click online payments, but charges are not initiated
+  automatically — a gateway mandate/e-NACH integration slots into
+  `billing.record_renewal_payment` unchanged.
 - Customer page accepts **images** (camera photos); the prototype's PDF-upload
   path (pdf.js) can be ported into `customer.html` when needed.
 - The spec's "mobile application" ships here as a mobile-friendly web app; the

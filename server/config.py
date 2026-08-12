@@ -2,8 +2,19 @@
 
 Spec references are to the PrintTech Project Planning Document (GOBT).
 """
+import os
 
-SECRET_KEY = "CHANGE_ME_printhub_flask_secret"
+SECRET_KEY = os.environ.get("PRINTHUB_SECRET_KEY", "CHANGE_ME_printhub_flask_secret")
+
+# --- PLATFORM Cashfree account (GOBT's own) ---
+# Receives vendor SUBSCRIPTION money: first combined payment (plan fee +
+# installation) and renewals. This is separate from each vendor's OWN
+# Cashfree account (stored per vendor row), which receives that shop's
+# customer print-job payments — every site has a DIFFERENT Cashfree account.
+PLATFORM_CASHFREE_APP_ID = os.environ.get("PLATFORM_CASHFREE_APP_ID", "")
+PLATFORM_CASHFREE_SECRET_KEY = os.environ.get("PLATFORM_CASHFREE_SECRET_KEY", "")
+PLATFORM_CASHFREE_WEBHOOK_SECRET = os.environ.get("PLATFORM_CASHFREE_WEBHOOK_SECRET", "")
+PLATFORM_CASHFREE_ENV = os.environ.get("PLATFORM_CASHFREE_ENV", "production")  # production|sandbox
 
 # --- Subscription & pricing model (spec §5, §6) ---
 INSTALLATION_FEE = 2000          # one-time, every vendor, non-recurring
@@ -15,8 +26,8 @@ PLANS = {
 GRACE_DAYS = 15                  # renewal grace period (spec §8.3)
 
 # --- Super Admin panel login (spec §8) ---
-ADMIN_USER = "admin"
-ADMIN_PASSWORD = "CHANGE_ME_admin_password"
+ADMIN_USER = os.environ.get("PRINTHUB_ADMIN_USER", "admin")
+ADMIN_PASSWORD = os.environ.get("PRINTHUB_ADMIN_PASSWORD", "CHANGE_ME_admin_password")
 
 # --- Supported document formats & their page layouts (spec §1) ---
 # layout: how front/back are placed on the printed A4 page AND shown in the UI.

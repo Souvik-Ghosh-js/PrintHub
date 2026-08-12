@@ -13,7 +13,14 @@
     header a { color: #cfd6f5; font-size: .9rem; }
     main { max-width: 1080px; margin: 20px auto; padding: 0 12px 60px; }
     .card { background: #fff; border-radius: 10px; padding: 18px;
-            margin-bottom: 16px; box-shadow: 0 1px 4px rgba(20,30,80,.08); }
+            margin-bottom: 16px; box-shadow: 0 1px 4px rgba(20,30,80,.08);
+            overflow-x: auto; }   /* wide tables scroll on phones */
+    @media (max-width: 520px) {
+      main { margin: 12px auto; padding: 0 8px 40px; }
+      .card { padding: 14px; }
+      input, select { font-size: 16px; }   /* no iOS zoom-on-focus */
+      .newv { flex-direction: column; align-items: stretch; }
+    }
     h2 { font-size: 1rem; color: #1c2a6e; margin: 0 0 12px; }
     table { width: 100%; border-collapse: collapse; font-size: .85rem; }
     th, td { padding: 6px 8px; border-bottom: 1px solid #e4e8f4; text-align: left;
@@ -57,6 +64,12 @@
       ₹{{ new_credentials.subscription_fee }} ({{ new_credentials.plan }}) +
       ₹{{ new_credentials.installation_fee }} installation =
       ₹{{ new_credentials.total }}</span>
+    {% if new_credentials.vendor_id %}
+    <br><br>Also hand over the shop's counter QR:
+    <a href="{{ url_for('shop_qr_poster', vendor_id=new_credentials.vendor_id) }}"
+       target="_blank">open the printable QR poster</a> — customers scan it to
+    upload &amp; pay, no login needed.
+    {% endif %}
   </div>
   {% endif %}
 
@@ -84,7 +97,9 @@
       {% for v in vendors %}
       <tr>
         <td><strong>{{ v.shop_name }}</strong><br>
-            <span class="muted">{{ v.name }} · /shop/{{ v.shop_code }}</span></td>
+            <span class="muted">{{ v.name }} · /{{ v.shop_code }} ·
+              <a href="{{ url_for('shop_qr_poster', vendor_id=v.id) }}"
+                 target="_blank">QR poster</a></span></td>
         <td>{{ v.login_id or '—' }}</td>
         <td>{{ v.plan }}</td>
         <td><span class="badge {{ v.status }}">{{ v.status.replace('_',' ') }}</span></td>
@@ -96,6 +111,8 @@
                 action="{{ url_for('admin_first_payment', vendor_id=v.id) }}">
             <button class="ok" type="submit">Record first payment + activate</button>
           </form>
+          <br><span class="muted">or send the pay link:
+            <code>/pay/onboard/{{ v.shop_code }}</code></span>
           {% else %}
             {% if v.plan != 'lifetime' %}
             <form class="inline" method="post"
