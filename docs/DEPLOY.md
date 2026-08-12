@@ -17,17 +17,18 @@ domain later.
    **HTTPS (443)**.
 5. Download the SSH key (`.pem`) from Account → SSH keys if you haven't.
 
-## 2. Upload the code (from your Windows PC)
+## 2. Get the code onto the instance
 
-```powershell
-cd C:\FRL\myprojs
-scp -i C:\path\to\key.pem -r PrintHub ubuntu@<STATIC_IP>:/home/ubuntu/printhub
+Deployment is git-based — push from your PC, clone/pull on the server:
+
+```bash
+ssh -i key.pem ubuntu@<STATIC_IP>
+sudo apt-get update -y && sudo apt-get install -y git
+git clone https://github.com/Souvik-Ghosh-js/PrintHub.git /home/ubuntu/printhub
 ```
 
-(`scp` ships with Windows 10/11. Exclude nothing — the ~8 MB ONNX model in
-`server/weights/` must go along. If you prefer, delete
-`server/printhub.sqlite` and `server/__pycache__` first; they're unused in
-production.)
+(The ~8 MB ONNX model in `server/weights/` is committed, so it comes along.
+For a private repo, use a deploy key or a PAT in the clone URL.)
 
 ## 3. Run the setup script (on the instance)
 
@@ -124,7 +125,7 @@ and point shop-PC workers at `https://yourdomain.com`.
 
 | Task | Command |
 |---|---|
-| Redeploy after code upload | `bash deploy/redeploy.sh` |
+| Redeploy (git push, then on server) | `bash deploy/redeploy.sh` |
 | App logs (live) | `sudo journalctl -u printhub -f` |
 | Restart app | `sudo systemctl restart printhub` |
 | MySQL shell | `sudo mysql printhub` |
