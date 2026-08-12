@@ -107,14 +107,15 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     file_url           TEXT,
     storage_key        VARCHAR(512),
     original_filename  VARCHAR(512),
-    status             VARCHAR(32)  NOT NULL DEFAULT 'uploaded',  -- uploaded|confirmed|printed
+    status             VARCHAR(32)  NOT NULL DEFAULT 'awaiting_payment',
+        -- awaiting_payment|confirmed|printed|cancelled
     total_pages        INT          DEFAULT 1,
     sides              VARCHAR(16)  DEFAULT 'single',
     orientation        VARCHAR(16)  DEFAULT 'portrait',
     color_mode         VARCHAR(16)  DEFAULT 'bw',
     paper_size         VARCHAR(16)  DEFAULT 'A4',
     price              DECIMAL(10,2) DEFAULT 0.00,
-    payment_status     VARCHAR(32)  NOT NULL DEFAULT 'counter',   -- counter|paid|pending
+    payment_status     VARCHAR(32)  NOT NULL DEFAULT 'pending',   -- pending|paid|failed
     copies             INT          DEFAULT 1,
     order_id           VARCHAR(128),         -- Cashfree order (online payments)
     transaction_id     VARCHAR(128),

@@ -12,6 +12,7 @@ Core scanning/composing logic is ported from the working prototype
 import io
 import json
 import os
+import re
 import time
 import uuid
 from datetime import datetime
@@ -91,9 +92,12 @@ def health():
 # ===========================================================================
 @app.route("/")
 def index():
-    """Landing: list of shops customers can print at (active or in grace)."""
+    """Landing: shops customers can actually order from — subscription live
+    AND their own Cashfree account configured (payment is online-only)."""
     vendors = [billing.refresh_status(v) for v in db.list_vendors()]
-    shops = [v for v in vendors if billing.has_access(v)]
+    shops = [v for v in vendors
+             if billing.has_access(v) and _vendor_gateway_ready(v)
+             and float(v.get("price_bw") or 0) > 0]
     return render_template("landing.html", shops=shops)
 
 
@@ -109,9 +113,15 @@ def shop(code):
     if not billing.has_access(vendor):
         return render_template("landing.html", shops=[],
                                error="This shop is not available right now."), 404
+    # Payment is online-only, so a shop is only orderable once it has its own
+    # Cashfree account AND real prices set.
+    if not _vendor_gateway_ready(vendor) or float(vendor.get("price_bw") or 0) <= 0:
+        return render_template(
+            "landing.html", shops=[],
+            error=f"{vendor['shop_name']} is still finishing setup and can't "
+                  f"take orders yet. Please ask at the counter."), 503
     return render_template("customer.html", vendor=vendor,
-                           formats=config.DOC_FORMATS,
-                           online_pay=_vendor_gateway_ready(vendor))
+                           formats=config.DOC_FORMATS)
 
 
 # Canonical short URL — we're the provider, each vendor gets a clean branded
@@ -290,40 +300,44 @@ def shop_preview(code):
 
 @app.route("/shop/<code>/order", methods=["POST"])
 def shop_order(code):
-    """Create a print job at this vendor. Price = vendor's per-page price
-    (spec §6.5) x pages x copies.
+    """Create a print job at this vendor and start its ONLINE payment.
 
-    pay_mode=counter  -> job goes straight to the worker; paid at the counter.
-    pay_mode=online   -> a Cashfree order is created on THIS VENDOR'S OWN
-                         Cashfree account (every site has a different
-                         account); the job reaches the worker only after the
-                         payment succeeds.
+    Payment is online-only: a Cashfree order is created on THIS VENDOR'S OWN
+    Cashfree account (every site has a different account), and the job only
+    reaches the shop's printer after the payment actually succeeds. There is
+    no counter/manual path — nothing prints unpaid.
     """
     vendor = billing.refresh_status(db.get_vendor_by_code(code))
     if not billing.has_access(vendor):
         return jsonify({"error": "shop unavailable"}), 404
+    if not _vendor_gateway_ready(vendor):
+        return jsonify({"error": "This shop has not finished setting up online "
+                                 "payments yet. Please ask at the counter."}), 503
 
     doc_format = request.form.get("doc_format", "document")
     color_mode = request.form.get("color_mode", "bw")
     copies = max(1, int(request.form.get("copies", 1)))
     customer_name = request.form.get("customer_name", "")[:250]
-    pay_mode = request.form.get("pay_mode", "counter")
-    if pay_mode == "online" and not _vendor_gateway_ready(vendor):
-        return jsonify({"error": "Online payment is not available at this shop."}), 400
+    customer_phone = re.sub(r"\D", "", request.form.get("customer_phone", ""))[:15]
+
+    per_page = float(vendor["price_colour"] if color_mode == "color"
+                     else vendor["price_bw"])
+    if per_page <= 0:
+        return jsonify({"error": "This shop has not set its prices yet. "
+                                 "Please ask at the counter."}), 503
 
     try:
         pdf_bytes, total_pages = _order_pdf_from_request(doc_format)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
-    per_page = float(vendor["price_colour"] if color_mode == "color"
-                     else vendor["price_bw"])
     price = round(per_page * total_pages * copies, 2)
+    if price <= 0:
+        return jsonify({"error": "Could not price this order."}), 400
 
     label = config.DOC_FORMATS.get(doc_format, {}).get("label", "Document")
     storage_key = f"{uuid.uuid4().hex}.pdf"
     db.storage_save(storage_key, pdf_bytes)
-    online = pay_mode == "online" and price > 0
     job_id = db.insert_job({
         "vendor_id": vendor["id"],
         "customer_id": request.form.get("customer_id") or uuid.uuid4().hex[:12],
@@ -332,63 +346,66 @@ def shop_order(code):
         "storage_key": storage_key,
         "file_url": db.public_url(storage_key, vendor["worker_token"]),
         "original_filename": f"{label} - {customer_name or 'customer'}.pdf",
-        # Online orders wait for payment; counter orders print immediately.
-        "status": "awaiting_payment" if online else "confirmed",
+        "status": "awaiting_payment",   # printed only after payment succeeds
         "total_pages": total_pages,
         "color_mode": color_mode,
         "copies": copies,
         "price": price,
-        "payment_status": "pending" if online else "counter",
+        "payment_status": "pending",
     })
     db.log_activity("customer", "job_created",
-                    f"job {job_id}: {label}, {color_mode}, x{copies}, ₹{price} "
-                    f"({'online' if online else 'counter'})",
+                    f"job {job_id}: {label}, {color_mode}, x{copies}, ₹{price}",
                     vendor_id=vendor["id"])
 
-    if not online:
-        return jsonify({"ok": True, "job_id": job_id, "price": price,
-                        "total_pages": total_pages, "pay_mode": "counter"})
-
-    # --- online: create the Cashfree order on the VENDOR's account ---
     order_id = f"PJOB_{job_id}_{int(time.time())}"
-    base = request.url_root
     result = cashfree.create_order(
         app_id=vendor["cashfree_app_id"],
         secret_key=vendor["cashfree_secret_key"],
         env=vendor.get("cashfree_env") or "production",
         order_id=order_id, amount=price,
-        customer_id=customer_name or "customer",
+        customer_id=f"cust_{job_id}",
         customer_email="customer@example.com",
-        customer_phone="9999999999",
-        return_url=f"{base}{code}",
+        customer_phone=customer_phone or "9999999999",
+        return_url=f"{request.url_root}{code}",
         note=f"Print job #{job_id} at {vendor['shop_name']}",
     )
     if not result["success"]:
-        # Fall back gracefully: keep the job, let the customer pay at the counter.
-        db.update_job(job_id, {"status": "confirmed", "payment_status": "counter"})
-        return jsonify({"ok": True, "job_id": job_id, "price": price,
-                        "total_pages": total_pages, "pay_mode": "counter",
-                        "note": f"Online payment unavailable ({result['error']}) — "
-                                f"pay at the counter."})
+        # No payment session -> no job. Never leave an unpayable job queued.
+        db.update_job(job_id, {"status": "cancelled",
+                               "payment_status": "failed"})
+        db.storage_remove(storage_key)
+        db.log_activity("system", "order_failed",
+                        f"job {job_id}: gateway error: {result['error']}",
+                        vendor_id=vendor["id"])
+        return jsonify({"error": "Could not start the payment. Please try "
+                                 "again in a moment.",
+                        "detail": result["error"]}), 502
 
     db.update_job(job_id, {"order_id": order_id})
     db.insert_gateway_order({"order_id": order_id, "vendor_id": vendor["id"],
                              "purpose": "print_job", "amount": price})
     return jsonify({"ok": True, "job_id": job_id, "price": price,
-                    "total_pages": total_pages, "pay_mode": "online",
+                    "total_pages": total_pages,
                     "order_id": order_id,
                     "payment_session_id": result["payment_session_id"],
                     "cf_env": vendor.get("cashfree_env") or "production"})
 
 
 def _finalize_print_order(order, success, transaction_id=None):
-    """Idempotently apply a print-job payment result (webhook or poll)."""
+    """Idempotently apply a print-job payment result (webhook or poll).
+
+    Unpaid orders are cancelled and their stored PDF removed — nothing that
+    was never paid for is left queued or on disk.
+    """
     if order["status"] == "paid":
         return "paid"
     if not success:
         db.update_gateway_order(order["order_id"], {"status": "failed"})
-        db.update_jobs_by_order(order["order_id"],
-                                {"payment_status": "failed"})
+        for job in db.get_jobs_by_order(order["order_id"]):
+            db.update_job(job["id"], {"status": "cancelled",
+                                      "payment_status": "failed"})
+            if job.get("storage_key"):
+                db.storage_remove(job["storage_key"])
         return "failed"
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     db.update_gateway_order(order["order_id"],
@@ -558,9 +575,22 @@ def vendor_logout():
 def vendor_dashboard(vendor):
     jobs = db.get_vendor_jobs(vendor["id"], limit=50)
     payments = db.list_payments(vendor_id=vendor["id"], limit=20)
-    return render_template("vendor_dashboard.html", vendor=vendor, jobs=jobs,
-                           payments=payments, plans=config.PLANS,
-                           worker_exe=worker_exe_available())
+    has_gateway = _vendor_gateway_ready(vendor)
+    has_prices = float(vendor.get("price_bw") or 0) > 0
+    stats = {
+        "printed": sum(1 for j in jobs if j["status"] == "printed"),
+        "queued": sum(1 for j in jobs if j["status"] == "confirmed"),
+        "revenue": sum(float(j["price"] or 0) for j in jobs
+                       if j.get("payment_status") == "paid"),
+    }
+    base = db.PUBLIC_BASE_URL.rstrip("/")
+    return render_template(
+        "vendor_dashboard.html", vendor=vendor, jobs=jobs, payments=payments,
+        plans=config.PLANS, worker_exe=worker_exe_available(),
+        has_gateway=has_gateway, has_prices=has_prices, stats=stats,
+        live=billing.has_access(vendor) and has_gateway and has_prices,
+        shop_url=f"{base}/{vendor['shop_code']}",
+        webhook_url=f"{base}/payment/webhook/vendor")
 
 
 @app.route("/vendor/pricing", methods=["POST"])
@@ -614,11 +644,14 @@ def _start_subscription_checkout(vendor, purpose):
     if purpose == "first_payment":
         amounts = billing.first_payment(vendor["plan"])
         amount = amounts["total"]
+        plan_fee = amounts["subscription_fee"]
+        install_fee = amounts["installation_fee"]
         prefix = "SUB"
         note = (f"PrintHub {vendor['plan']} subscription "
-                f"+ ₹{amounts['installation_fee']} installation")
+                f"+ ₹{install_fee} installation")
     else:
         amount = billing.renewal_amount(vendor["plan"])
+        plan_fee, install_fee = amount, 0
         prefix = "REN"
         note = f"PrintHub {vendor['plan']} renewal"
 
@@ -640,6 +673,7 @@ def _start_subscription_checkout(vendor, purpose):
                              "purpose": purpose, "amount": amount})
     return render_template("pay.html", shop_name=vendor["shop_name"],
                            plan=vendor["plan"], amount=amount,
+                           plan_fee=plan_fee, install_fee=install_fee,
                            order_id=order_id, purpose=purpose,
                            payment_session_id=result["payment_session_id"],
                            cf_env=config.PLATFORM_CASHFREE_ENV), None
@@ -907,10 +941,19 @@ def admin_panel():
     payments = db.list_payments(limit=100)
     activity = db.list_activity(limit=150)
     creds = session.pop("new_credentials", None)  # shown exactly once
+    stats = {
+        "live": sum(1 for v in vendors if billing.has_access(v)
+                    and _vendor_gateway_ready(v)
+                    and float(v.get("price_bw") or 0) > 0),
+        "pending": sum(1 for v in vendors if v["status"] == "pending_payment"),
+        "revenue": sum(float(p["amount"] or 0) for p in payments
+                       if p.get("status") == "paid"),
+    }
     return render_template("admin.html", vendors=vendors, payments=payments,
                            activity=activity, plans=config.PLANS,
                            installation_fee=config.INSTALLATION_FEE,
-                           new_credentials=creds)
+                           new_credentials=creds, stats=stats,
+                           base_url=db.PUBLIC_BASE_URL.rstrip("/"))
 
 
 @app.route("/admin/vendors", methods=["POST"])
@@ -928,7 +971,6 @@ def admin_create_vendor():
                  or uuid.uuid4().hex[:8])
     # The code becomes the vendor's short URL on our domain (/<code>), so it
     # must be a clean slug and must not shadow a platform route.
-    import re
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,31}", shop_code):
         flash("Shop code must be 2-32 chars: letters, digits, hyphens.")
         return redirect(url_for("admin_panel"))
@@ -949,44 +991,11 @@ def admin_create_vendor():
     db.log_activity("admin", "vendor_registered",
                     f"{shop_name} ({plan}); first payment due ₹{amounts['total']}",
                     vendor_id=vendor_id)
-    msg = (f"Vendor registered. First payment due: ₹{amounts['total']} "
-           f"(₹{amounts['subscription_fee']} {plan} + "
-           f"₹{amounts['installation_fee']} installation).")
-    if cashfree.configured(config.PLATFORM_CASHFREE_APP_ID,
-                           config.PLATFORM_CASHFREE_SECRET_KEY):
-        msg += (f" Online payment link for the vendor: "
-                f"{request.url_root.rstrip('/')}/pay/onboard/{shop_code} — "
-                f"credentials are auto-generated on successful payment.")
-    else:
-        msg += " (Platform Cashfree not configured — record the payment manually.)"
-    flash(msg)
-    return redirect(url_for("admin_panel"))
-
-
-@app.route("/admin/vendors/<int:vendor_id>/first-payment", methods=["POST"])
-@admin_required
-def admin_first_payment(vendor_id):
-    vendor = db.get_vendor(vendor_id)
-    if not vendor or vendor["status"] != "pending_payment":
-        flash("Vendor not found or already activated.")
-        return redirect(url_for("admin_panel"))
-    creds = billing.record_first_payment(vendor, method="manual")
-    # Stash for one-time display on the next page load (spec: delivered once).
-    session["new_credentials"] = {"shop_name": vendor["shop_name"],
-                                  "vendor_id": vendor["id"], **creds}
-    return redirect(url_for("admin_panel"))
-
-
-@app.route("/admin/vendors/<int:vendor_id>/renewal-payment", methods=["POST"])
-@admin_required
-def admin_renewal_payment(vendor_id):
-    vendor = db.get_vendor(vendor_id)
-    if not vendor or not vendor.get("login_id"):
-        flash("Vendor not found or not yet activated.")
-        return redirect(url_for("admin_panel"))
-    amount = billing.record_renewal_payment(vendor, method="manual")
-    flash(f"Renewal of ₹{amount} recorded for {vendor['shop_name']}; "
-          f"subscription extended.")
+    # Activation happens ONLY through a real Cashfree payment on this link.
+    flash(f"Vendor registered. Send them this payment link to activate — "
+          f"₹{amounts['total']} (₹{amounts['subscription_fee']} {plan} + "
+          f"₹{amounts['installation_fee']} installation): "
+          f"{request.url_root.rstrip('/')}/pay/onboard/{shop_code}")
     return redirect(url_for("admin_panel"))
 
 

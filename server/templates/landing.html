@@ -1,43 +1,73 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>PrintHub — scan &amp; print at a shop near you</title>
-  <style>
-    body { font-family: 'Segoe UI', system-ui, sans-serif; margin: 0;
-           background: #f2f4f8; color: #1c2333; }
-    header { background: #1c2a6e; color: #fff; padding: 16px 20px; }
-    header h1 { margin: 0; font-size: 1.3rem; }
-    main { max-width: 640px; margin: 24px auto; padding: 0 12px; }
-    .card { background: #fff; border-radius: 10px; padding: 18px;
-            margin-bottom: 12px; box-shadow: 0 1px 4px rgba(20,30,80,.08); }
-    a.shop { display: block; text-decoration: none; color: inherit; }
-    a.shop:hover { outline: 2px solid #1c2a6e33; }
-    .muted { color: #6a76a8; font-size: .88rem; }
-    .err { color: #b32020; }
-    footer { text-align: center; padding: 24px; }
-    footer a { color: #6a76a8; font-size: .85rem; margin: 0 8px; }
-  </style>
-</head>
-<body>
-<header><h1>PrintHub</h1></header>
-<main>
-  {% if error %}<p class="err">{{ error }}</p>{% endif %}
-  <h2 style="font-size:1.05rem;">Choose a print shop</h2>
+{% extends "base.html" %}
+{% block title %}PrintHub — scan &amp; print at a shop near you{% endblock %}
+{% block wrapclass %}wrap-narrow{% endblock %}
+{% block nav %}<a href="{{ url_for('vendor_login') }}">Vendor sign in</a>{% endblock %}
+
+{% block head %}
+<style>
+  .hero { text-align: center; padding: 2rem 0 1.5rem; }
+  .hero h1 { font-size: 2rem; }
+  .hero p { color: var(--muted); max-width: 460px; margin: 0 auto; }
+  .how { display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem;
+         margin: 1.75rem 0; }
+  @media (max-width: 560px) { .how { grid-template-columns: 1fr; } }
+  .how-item { text-align: center; padding: 1rem .75rem; background: var(--surface);
+              border: 1px solid var(--line); border-radius: var(--r); }
+  .how-ico { font-size: 1.6rem; }
+  .shop-link { display: flex; align-items: center; gap: .85rem; padding: .9rem 1rem;
+               border: 1px solid var(--line); border-radius: var(--r);
+               background: var(--surface); color: inherit; margin-bottom: .6rem;
+               transition: border-color .15s, transform .12s; }
+  .shop-link:hover { border-color: var(--brand-500); text-decoration: none;
+                     transform: translateY(-1px); }
+  .shop-ico { width: 40px; height: 40px; border-radius: 11px; flex: none;
+              display: grid; place-items: center; color: #fff; font-size: 1.1rem;
+              background: linear-gradient(135deg, var(--brand-500), var(--brand-700)); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <h1>Print anything, straight from your phone</h1>
+  <p>Scan the QR at your print shop, photograph your document, pay online —
+    it prints while you wait.</p>
+</div>
+
+{% if error %}<div class="note note-warn">{{ error }}</div>{% endif %}
+
+<div class="how">
+  <div class="how-item"><div class="how-ico">📷</div>
+    <strong>1 · Scan</strong><div class="muted tiny">Photograph your document</div></div>
+  <div class="how-item"><div class="how-ico">✨</div>
+    <strong>2 · Auto-fix</strong><div class="muted tiny">Cropped &amp; cleaned by AI</div></div>
+  <div class="how-item"><div class="how-ico">💳</div>
+    <strong>3 · Pay</strong><div class="muted tiny">UPI or card, then it prints</div></div>
+</div>
+
+{% if shops %}
+<div class="card">
+  <div class="card-head"><h2>Shops online now</h2></div>
   {% for v in shops %}
-  <a class="shop card" href="/{{ v.shop_code }}">
-    <strong>{{ v.shop_name }}</strong>
-    <div class="muted">B/W ₹{{ '%.2f' % v.price_bw }}/page ·
-      Colour ₹{{ '%.2f' % v.price_colour }}/page</div>
+  <a class="shop-link" href="/{{ v.shop_code }}">
+    <span class="shop-ico">🖨</span>
+    <span style="flex:1;">
+      <strong>{{ v.shop_name }}</strong><br>
+      <span class="muted tiny">B/W ₹{{ '%.2f'|format(v.price_bw) }} ·
+        Colour ₹{{ '%.2f'|format(v.price_colour) }} per page</span>
+    </span>
+    <span class="muted">›</span>
   </a>
-  {% else %}
-  <p class="muted">No shops are online right now.</p>
   {% endfor %}
-</main>
-<footer>
-  <a href="{{ url_for('vendor_login') }}">Vendor login</a> ·
-  <a href="{{ url_for('admin_login') }}">Admin</a>
-</footer>
-</body>
-</html>
+</div>
+{% elif not error %}
+<div class="card center">
+  <p class="muted" style="margin:0;">No shops are online right now.<br>
+    Scan the QR code at your print shop's counter to get started.</p>
+</div>
+{% endif %}
+
+<p class="center muted tiny" style="margin-top:1.5rem;">
+  Run a print shop? <a href="{{ url_for('vendor_login') }}">Sign in</a> ·
+  <a href="{{ url_for('admin_login') }}">Administrator</a>
+</p>
+{% endblock %}

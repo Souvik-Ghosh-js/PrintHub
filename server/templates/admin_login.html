@@ -1,31 +1,23 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Super Admin — PrintHub</title>
-  <style>
-    body { font-family: 'Segoe UI', system-ui, sans-serif; background: #1c2333;
-           display: flex; align-items: center; justify-content: center;
-           min-height: 100vh; margin: 0; }
-    form { background: #fff; padding: 28px; border-radius: 10px; width: 320px; }
-    h1 { font-size: 1.1rem; color: #1c2a6e; margin: 0 0 16px; }
-    input { width: 100%; padding: 10px; margin-bottom: 12px; border: 1px solid #ccd3ea;
-            border-radius: 6px; box-sizing: border-box; }
-    button { width: 100%; padding: 11px; background: #1c2a6e; color: #fff;
-             border: none; border-radius: 6px; font-size: 1rem; cursor: pointer; }
-    .flash { color: #b32020; font-size: .88rem; margin-bottom: 10px; }
-  </style>
-</head>
-<body>
-  <form method="post">
-    <h1>PrintHub — Super Admin</h1>
-    {% with messages = get_flashed_messages() %}
-      {% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}
-    {% endwith %}
-    <input name="username" placeholder="Username" required autofocus>
-    <input name="password" type="password" placeholder="Password" required>
-    <button type="submit">Log in</button>
+{% extends "base.html" %}
+{% block title %}Administrator — PrintHub{% endblock %}
+{% block wrapclass %}wrap-tight{% endblock %}
+{% block brandsub %}Admin{% endblock %}
+{% block nav %}<a href="/">Home</a>{% endblock %}
+
+{% block content %}
+<div class="card" style="margin-top:2rem;">
+  <h1 style="margin-bottom:.25rem;">Administrator</h1>
+  <p class="muted" style="margin-bottom:1.25rem;">Platform control panel.</p>
+  <form method="post" action="{{ url_for('admin_login') }}">
+    <div class="field">
+      <label for="username">Username</label>
+      <input type="text" id="username" name="username" autocomplete="username" required autofocus>
+    </div>
+    <div class="field">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" required>
+    </div>
+    <button type="submit" class="btn btn-primary btn-block btn-lg" style="margin-top:1.1rem;">Sign in</button>
   </form>
-</body>
-</html>
+</div>
+{% endblock %}

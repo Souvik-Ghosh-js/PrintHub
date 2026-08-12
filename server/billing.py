@@ -1,10 +1,10 @@
 """Billing + subscription lifecycle (spec §5, §6, §8.3).
 
-Payment model: payments are RECORDED here (amounts per the spec's plan table)
-and the lifecycle (activation, renewal, grace, suspension) is enforced by this
-module. A real gateway (the prototype ships a working Cashfree integration)
-can be wired to call record_first_payment / record_renewal_payment on webhook
-success without changing anything else.
+Payment model: ONLINE ONLY. Money is collected through Cashfree — vendor
+subscriptions/renewals on the platform account, customer print jobs on each
+vendor's own account. The functions here are called by app.py only after a
+gateway payment is confirmed (webhook or verified order status); they never
+mark anything paid on their own, and there is no manual/counter path.
 """
 import secrets
 import string
@@ -53,10 +53,10 @@ def _next_renewal(plan: str, start: datetime):
     return (start + timedelta(days=period)) if period else None  # lifetime: never
 
 
-def record_first_payment(vendor, method="manual", reference=None):
-    """First combined payment (subscription + installation): activates the
-    vendor and generates their credentials. Returns the plaintext credentials
-    (shown ONCE to the admin for delivery; only the hash is stored)."""
+def record_first_payment(vendor, method="cashfree", reference=None):
+    """First combined payment (subscription + installation), CONFIRMED by the
+    gateway: activates the vendor and generates their credentials. Returns the
+    plaintext credentials (shown ONCE for delivery; only the hash is stored)."""
     from werkzeug.security import generate_password_hash
 
     amounts = first_payment(vendor["plan"])
@@ -84,9 +84,10 @@ def record_first_payment(vendor, method="manual", reference=None):
     return {"login_id": login_id, "password": password, **amounts}
 
 
-def record_renewal_payment(vendor, method="autopay", reference=None):
-    """Renewal payment: extends the subscription one period and reactivates
-    the vendor whatever state they were in (grace/suspended/rejected)."""
+def record_renewal_payment(vendor, method="cashfree", reference=None):
+    """Renewal payment CONFIRMED by the gateway: extends the subscription one
+    period and reactivates the vendor whatever state they were in
+    (grace/suspended/rejected)."""
     amount = renewal_amount(vendor["plan"])
     db.insert_payment({"vendor_id": vendor["id"], "kind": "renewal",
                        "plan": vendor["plan"], "amount": amount,

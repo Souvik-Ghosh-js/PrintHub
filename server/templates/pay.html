@@ -1,48 +1,50 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Payment — PrintHub</title>
-  <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
-  <style>
-    body { font-family: 'Segoe UI', system-ui, sans-serif; margin: 0;
-           background: #f2f4f8; color: #1c2333; }
-    main { max-width: 520px; margin: 60px auto; padding: 0 12px; }
-    .card { background: #fff; border-radius: 10px; padding: 24px;
-            box-shadow: 0 1px 4px rgba(20,30,80,.08); }
-    h1 { font-size: 1.2rem; color: #1c2a6e; margin-top: 0; }
-    .amount { font-size: 1.8rem; font-weight: 700; color: #1c2a6e; }
-    button { padding: 12px 26px; background: #1c8a3c; color: #fff; border: none;
-             border-radius: 8px; font-size: 1rem; cursor: pointer; margin-top: 16px; }
-    .muted { color: #6a76a8; font-size: .87rem; }
-  </style>
-</head>
-<body>
-<main>
-  <div class="card">
-    <h1>{{ shop_name }}</h1>
-    <p>{{ 'First payment' if purpose == 'first_payment' else 'Renewal' }} —
-       <strong>{{ plan }}</strong> plan</p>
-    <p class="amount">₹{{ amount }}</p>
+{% extends "base.html" %}
+{% block title %}Payment — PrintHub{% endblock %}
+{% block wrapclass %}wrap-tight{% endblock %}
+{% block head %}<script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>{% endblock %}
+{% block nav %}{% endblock %}
+
+{% block content %}
+<div class="card" style="margin-top:2rem;">
+  <h1 style="margin-bottom:.2rem;">{{ shop_name }}</h1>
+  <p class="muted">{{ 'Activate your PrintHub subscription' if purpose == 'first_payment'
+                     else 'Renew your PrintHub subscription' }}</p>
+
+  <div style="background:var(--surface-2); border:1px solid var(--line);
+              border-radius:var(--r); padding:1rem; margin:1.1rem 0;">
     {% if purpose == 'first_payment' %}
-      <p class="muted">Includes the one-time ₹2,000 installation fee. Your
-        Login ID and Password are generated automatically after payment and
-        shown once on the next page.</p>
-    {% else %}
-      <p class="muted">Plan fee only — the installation fee is never charged
-        again.</p>
+      <div class="row-between"><span class="muted">{{ plan|capitalize }} plan</span>
+        <span>₹{{ plan_fee }}</span></div>
+      <div class="row-between" style="margin-top:.4rem;">
+        <span class="muted">One-time installation</span><span>₹{{ install_fee }}</span></div>
+      <hr style="border:none;border-top:1px solid var(--line);margin:.7rem 0;">
     {% endif %}
-    <button id="pay-btn">Pay ₹{{ amount }}</button>
-    <p class="muted">Order: {{ order_id }}</p>
+    <div class="row-between">
+      <strong>Total due now</strong>
+      <strong style="font-size:1.5rem;">₹{{ amount }}</strong>
+    </div>
   </div>
-</main>
+
+  <button id="pay-btn" class="btn btn-success btn-block btn-lg">Pay ₹{{ amount }} securely</button>
+
+  <p class="muted tiny" style="margin-top:1rem;">
+    {% if purpose == 'first_payment' %}
+      Your Login ID and Password are generated automatically the moment payment
+      succeeds, and shown once on the next screen.
+    {% else %}
+      Plan fee only — the installation fee is never charged again.
+    {% endif %}
+  </p>
+  <p class="muted tiny">Order {{ order_id }} · secured by Cashfree</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
 <script>
   const cf = new Cashfree({ mode: "{{ cf_env }}" });
-  document.getElementById("pay-btn").addEventListener("click", () => {
-    cf.checkout({ paymentSessionId: "{{ payment_session_id }}",
-                  redirectTarget: "_self" });
+  document.getElementById("pay-btn").addEventListener("click", (e) => {
+    e.target.disabled = true; e.target.textContent = "Opening payment…";
+    cf.checkout({ paymentSessionId: "{{ payment_session_id }}", redirectTarget: "_self" });
   });
 </script>
-</body>
-</html>
+{% endblock %}

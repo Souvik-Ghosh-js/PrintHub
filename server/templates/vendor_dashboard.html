@@ -1,202 +1,251 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{ vendor.shop_name }} — Vendor dashboard</title>
-  <style>
-    body { font-family: 'Segoe UI', system-ui, sans-serif; margin: 0;
-           background: #f2f4f8; color: #1c2333; }
-    header { background: #1c2a6e; color: #fff; padding: 14px 20px;
-             display: flex; justify-content: space-between; align-items: center; }
-    header h1 { margin: 0; font-size: 1.15rem; }
-    header a { color: #cfd6f5; font-size: .9rem; }
-    main { max-width: 900px; margin: 20px auto; padding: 0 12px 60px; }
-    .card { background: #fff; border-radius: 10px; padding: 18px;
-            margin-bottom: 16px; box-shadow: 0 1px 4px rgba(20,30,80,.08);
-            overflow-x: auto; }   /* wide tables scroll on phones */
-    @media (max-width: 520px) {
-      main { margin: 12px auto; padding: 0 8px 40px; }
-      .card { padding: 14px; }
-      input[type=number], input[type=text], input[type=password], select {
-        font-size: 16px; }        /* no iOS zoom-on-focus */
-    }
-    h2 { font-size: 1rem; color: #1c2a6e; margin: 0 0 12px; }
-    table { width: 100%; border-collapse: collapse; font-size: .88rem; }
-    th, td { padding: 7px 8px; border-bottom: 1px solid #e4e8f4; text-align: left; }
-    th { background: #eef1f8; color: #1c2a6e; }
-    .badge { padding: 2px 10px; border-radius: 12px; font-size: .8rem; color: #fff; }
-    .active { background: #1c8a3c; } .grace { background: #c78a00; }
-    .suspended, .rejected { background: #b32020; } .pending_payment { background: #667; }
-    input[type=number] { padding: 8px; border: 1px solid #ccd3ea; border-radius: 6px; width: 110px; }
-    button { padding: 9px 16px; background: #1c2a6e; color: #fff; border: none;
-             border-radius: 6px; cursor: pointer; }
-    .flash { color: #1c8a3c; font-size: .9rem; }
-    .muted { color: #6a76a8; font-size: .87rem; }
-    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
-  </style>
-</head>
-<body>
-<header>
-  <h1>{{ vendor.shop_name }}</h1>
+{% extends "base.html" %}
+{% block title %}{{ vendor.shop_name }} — PrintHub{% endblock %}
+{% block brandsub %}Vendor{% endblock %}
+{% block nav %}
+  {% if live %}<a href="/{{ vendor.shop_code }}" target="_blank">View shop page ↗</a>{% endif %}
+  <a href="{{ url_for('vendor_logout') }}">Sign out</a>
+{% endblock %}
+
+{% block head %}
+<style>
+  /* cards size to their own content instead of stretching to the tallest */
+  .grid2 { align-items: start; }
+  .kv-row { display: flex; justify-content: space-between; gap: 1rem;
+            padding: .55rem .7rem; background: var(--surface-2);
+            border-radius: var(--r-sm); font-size: .875rem; }
+  .kv-row + .kv-row { margin-top: .4rem; }
+  .kv-row .k { color: var(--muted); font-weight: 600; }
+  .kv-row .v { text-align: right; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row-between" style="margin-bottom:1.1rem; flex-wrap:wrap;">
   <div>
-    <a href="{{ url_for('shop', code=vendor.shop_code) }}" target="_blank">Customer page ↗</a> ·
-    <a href="{{ url_for('vendor_logout') }}">Log out</a>
+    <h1 style="margin-bottom:.2rem;">{{ vendor.shop_name }}</h1>
+    <p class="muted" style="margin:0;">
+      {% if live %}Live at <code>{{ shop_url }}</code>
+      {% else %}Not accepting orders yet — finish the setup below{% endif %}
+    </p>
   </div>
-</header>
-<main>
-  {% with messages = get_flashed_messages() %}
-    {% for m in messages %}<p class="flash">{{ m }}</p>{% endfor %}
-  {% endwith %}
+  <span class="pill {{ 'pill-ok' if vendor.status == 'active'
+                      else 'pill-warn' if vendor.status == 'grace'
+                      else 'pill-bad' if vendor.status in ('suspended','rejected')
+                      else 'pill-neutral' }}">{{ vendor.status.replace('_',' ') }}</span>
+</div>
 
-  <div class="grid">
-    <div class="card">
-      <h2>Subscription</h2>
-      <p>Plan: <strong>{{ plans[vendor.plan].label }}</strong> —
-         <span class="badge {{ vendor.status }}">{{ vendor.status.replace('_',' ') }}</span></p>
-      {% if vendor.plan != 'lifetime' and vendor.renews_at %}
-        <p class="muted">Renews: {{ vendor.renews_at }}</p>
-        {% if vendor.status == 'grace' %}
-          <p class="muted">⚠ Grace period until {{ vendor.grace_until }} —
-             renew to avoid suspension.</p>
-        {% endif %}
-        <form method="post" action="{{ url_for('vendor_renew_online') }}">
-          <button type="submit">Renew online — ₹{{ plans[vendor.plan].fee }}</button>
-        </form>
-        <p class="muted">Renewal is the plan fee only; the installation fee is
-          never charged again.</p>
-      {% elif vendor.plan == 'lifetime' %}
-        <p class="muted">Lifetime access — no recurring charges.</p>
-      {% endif %}
-    </div>
+{% if not live %}
+<div class="note note-warn" style="margin-bottom:1rem;">
+  <strong>Your shop isn't taking orders yet.</strong>
+  {% if not has_prices %} Set your per-page prices.{% endif %}
+  {% if not has_gateway %} Add your Cashfree account so customers can pay.{% endif %}
+  Both are required — PrintHub only prints jobs that have been paid for online.
+</div>
+{% endif %}
 
-    <div class="card">
-      <h2>Your printing prices (per page)</h2>
-      <form method="post" action="{{ url_for('vendor_pricing') }}">
-        <p><label>Black &amp; White ₹
-          <input type="number" name="price_bw" step="0.5" min="0"
-                 value="{{ '%.2f' % vendor.price_bw }}"></label></p>
-        <p><label>Colour ₹
-          <input type="number" name="price_colour" step="0.5" min="0"
-                 value="{{ '%.2f' % vendor.price_colour }}"></label></p>
-        <button type="submit">Save prices</button>
-      </form>
-    </div>
-  </div>
+<div class="stats" style="margin-bottom:1rem;">
+  <div class="stat"><div class="stat-label">Jobs printed</div>
+    <div class="stat-value">{{ stats.printed }}</div></div>
+  <div class="stat"><div class="stat-label">In queue</div>
+    <div class="stat-value">{{ stats.queued }}</div></div>
+  <div class="stat"><div class="stat-label">Earned (paid)</div>
+    <div class="stat-value">₹{{ '%.0f'|format(stats.revenue) }}</div></div>
+  <div class="stat"><div class="stat-label">Plan</div>
+    <div class="stat-value" style="font-size:1.1rem;">{{ plans[vendor.plan].label }}</div></div>
+</div>
 
+<div class="grid2">
+  <!-- ---------- pricing ---------- -->
   <div class="card">
-    <h2>Your shop QR code
-      <span class="muted">— customers scan this at the counter, no login
-        needed: it opens your upload &amp; pay page</span></h2>
-    <div style="display:flex; gap:20px; align-items:center; flex-wrap:wrap;">
-      <img src="{{ url_for('shop_qr_png', vendor_id=vendor.id) }}"
-           alt="Shop QR" style="width:150px; image-rendering:pixelated;
-           border:6px solid #1c2a6e; border-radius:10px;">
-      <div>
-        <p class="muted">Your shop link:
-          <code>{{ request.url_root.rstrip('/') }}/{{ vendor.shop_code }}</code></p>
-        <p>
-          <a href="{{ url_for('shop_qr_poster', vendor_id=vendor.id) }}"
-             target="_blank"><button type="button">🖨 Print counter poster</button></a>
-          &nbsp;
-          <a href="{{ url_for('shop_qr_png', vendor_id=vendor.id) }}"
-             download="printhub-qr-{{ vendor.shop_code }}.png">Download PNG</a>
-        </p>
+    <div class="card-head">
+      <h2>Your prices</h2>
+      {% if has_prices %}<span class="pill pill-ok">set</span>
+      {% else %}<span class="pill pill-bad">required</span>{% endif %}
+    </div>
+    <p class="muted tiny">Charged per printed page. You keep 100% — customers
+      pay straight into your own Cashfree account.</p>
+    <form method="post" action="{{ url_for('vendor_pricing') }}">
+      <div class="field-row">
+        <div class="field">
+          <label for="price_bw">Black &amp; White (₹)</label>
+          <input type="number" id="price_bw" name="price_bw" step="0.5" min="0"
+                 value="{{ '%.2f'|format(vendor.price_bw) }}">
+        </div>
+        <div class="field">
+          <label for="price_colour">Colour (₹)</label>
+          <input type="number" id="price_colour" name="price_colour" step="0.5" min="0"
+                 value="{{ '%.2f'|format(vendor.price_colour) }}">
+        </div>
       </div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>Your Cashfree account
-      <span class="muted">— every shop uses its OWN account; customer print
-        payments go directly to you</span></h2>
-    <form method="post" action="{{ url_for('vendor_cashfree') }}">
-      <p><label>App ID<br>
-        <input type="text" name="cashfree_app_id" style="width:min(420px,100%);"
-               value="{{ vendor.cashfree_app_id or '' }}"></label></p>
-      <p><label>Secret key<br>
-        <input type="password" name="cashfree_secret_key" style="width:min(420px,100%);"
-               placeholder="{{ '•••••••• (saved — leave blank to keep)' if vendor.cashfree_secret_key else 'not set' }}"></label></p>
-      <p><label>Webhook secret<br>
-        <input type="password" name="cashfree_webhook_secret" style="width:min(420px,100%);"
-               placeholder="{{ '•••••••• (saved — leave blank to keep)' if vendor.cashfree_webhook_secret else 'not set' }}"></label></p>
-      <p><label>Environment
-        <select name="cashfree_env">
-          <option value="production" {% if vendor.cashfree_env != 'sandbox' %}selected{% endif %}>Production</option>
-          <option value="sandbox" {% if vendor.cashfree_env == 'sandbox' %}selected{% endif %}>Sandbox</option>
-        </select></label></p>
-      <p class="muted">In your Cashfree dashboard, set the webhook URL to
-        <code>{{ request.url_root.rstrip('/') }}/payment/webhook/vendor</code>.
-        {% if vendor.cashfree_app_id %}✓ Online payment is enabled on your
-        customer page.{% else %}Until keys are saved, customers pay at the
-        counter.{% endif %}</p>
-      <button type="submit">Save Cashfree account</button>
+      <button type="submit" class="btn btn-primary" style="margin-top:.9rem;">Save prices</button>
     </form>
   </div>
 
+  <!-- ---------- cashfree ---------- -->
   <div class="card">
-    <h2>Shop-PC worker app</h2>
-    <p class="muted">One app for every shop — install it on the printing PC,
-      log in with your PrintHub Login ID &amp; Password, and it prints paid
-      jobs automatically. It remembers your login, reconnects after reboots,
-      and printers can be changed anytime without reinstalling.</p>
+    <div class="card-head">
+      <h2>Payments (your Cashfree)</h2>
+      {% if has_gateway %}<span class="pill pill-ok">connected</span>
+      {% else %}<span class="pill pill-bad">required</span>{% endif %}
+    </div>
+    <p class="muted tiny">Your own account — customer payments land directly
+      with you. Leave a secret blank to keep the saved value.</p>
+    <form method="post" action="{{ url_for('vendor_cashfree') }}">
+      <div class="field">
+        <label for="cf_app">App ID</label>
+        <input type="text" id="cf_app" name="cashfree_app_id"
+               value="{{ vendor.cashfree_app_id or '' }}" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="cf_secret">Secret key</label>
+        <input type="password" id="cf_secret" name="cashfree_secret_key" autocomplete="off"
+               placeholder="{{ '•••••••• saved' if vendor.cashfree_secret_key else 'not set' }}">
+      </div>
+      <div class="field">
+        <label for="cf_hook">Webhook secret</label>
+        <input type="password" id="cf_hook" name="cashfree_webhook_secret" autocomplete="off"
+               placeholder="{{ '•••••••• saved' if vendor.cashfree_webhook_secret else 'not set' }}">
+      </div>
+      <div class="field">
+        <label for="cf_env">Mode</label>
+        <select id="cf_env" name="cashfree_env">
+          <option value="production" {% if vendor.cashfree_env != 'sandbox' %}selected{% endif %}>Production (live money)</option>
+          <option value="sandbox" {% if vendor.cashfree_env == 'sandbox' %}selected{% endif %}>Sandbox (testing)</option>
+        </select>
+      </div>
+      <p class="muted tiny" style="margin-top:.7rem;">In your Cashfree dashboard set the webhook URL to<br>
+        <code>{{ webhook_url }}</code></p>
+      <button type="submit" class="btn btn-primary">Save Cashfree account</button>
+    </form>
+  </div>
+</div>
+
+<!-- ---------- QR ---------- -->
+<div class="card">
+  <div class="card-head"><h2>Your counter QR code</h2></div>
+  <div style="display:flex; gap:1.25rem; align-items:center; flex-wrap:wrap;">
+    <img src="{{ url_for('shop_qr_png', vendor_id=vendor.id) }}" alt="Shop QR"
+         style="width:132px; border:6px solid var(--brand-600); border-radius:var(--r); image-rendering:pixelated; background:#fff;">
+    <div style="flex:1; min-width:230px;">
+      <p class="muted" style="margin-bottom:.5rem;">Customers scan this at your
+        counter — no app, no login. It opens your page:<br>
+        <code>{{ shop_url }}</code></p>
+      <div class="btn-row">
+        <a class="btn btn-primary btn-sm" target="_blank"
+           href="{{ url_for('shop_qr_poster', vendor_id=vendor.id) }}">🖨 Print poster</a>
+        <a class="btn btn-ghost btn-sm" download="printhub-qr-{{ vendor.shop_code }}.png"
+           href="{{ url_for('shop_qr_png', vendor_id=vendor.id) }}">Download PNG</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ---------- worker app + printers ---------- -->
+<div class="grid2">
+  <div class="card">
+    <div class="card-head"><h2>Shop PC app</h2></div>
+    <p class="muted tiny">Install on the PC connected to your printers. Sign in
+      with these same credentials — paid jobs then print automatically.</p>
     {% if worker_exe %}
-      <p><a href="{{ url_for('download_worker') }}"><button type="button">⬇ Download PrintHubWorker.exe</button></a></p>
+      <a class="btn btn-primary" href="{{ url_for('download_worker') }}">⬇ Download for Windows</a>
     {% else %}
-      <p class="muted">Download not available yet — ask the administrator for
-        the PrintHubWorker.exe installer.</p>
+      <p class="muted">Ask the administrator for the installer.</p>
     {% endif %}
   </div>
 
   <div class="card">
-    <h2>Printer configuration <span class="muted">(managed from the desktop
-      worker app — “Change Printer” there updates this)</span></h2>
-    <table>
-      <tr><th>Mode</th><td>{{ 'Multiple printers (B/W + Colour)' if vendor.printer_mode == 'multi' else 'Single printer' }}</td></tr>
-      {% if vendor.printer_mode == 'multi' %}
-      <tr><th>B/W printer</th><td>{{ vendor.printer_bw or '—' }}
-          <span class="muted">tray: {{ vendor.tray_bw or 'auto' }}</span></td></tr>
-      <tr><th>Colour printer</th><td>{{ vendor.printer_colour or '—' }}
-          <span class="muted">tray: {{ vendor.tray_colour or 'auto' }}</span></td></tr>
-      {% else %}
-      <tr><th>Printer</th><td>{{ vendor.printer_single or '—' }}
-          <span class="muted">tray: {{ vendor.tray_single or 'auto' }}</span></td></tr>
-      {% endif %}
-    </table>
+    <div class="card-head"><h2>Printers</h2>
+      <span class="pill pill-neutral">{{ 'B/W + Colour' if vendor.printer_mode == 'multi' else 'Single' }}</span>
+    </div>
+    {% if vendor.printer_mode == 'multi' %}
+      <div class="kv-row"><span class="k">B/W</span>
+        <span class="v">{{ vendor.printer_bw or '— not set —' }}<br>
+          <span class="muted tiny">tray: {{ vendor.tray_bw or 'auto' }}</span></span></div>
+      <div class="kv-row"><span class="k">Colour</span>
+        <span class="v">{{ vendor.printer_colour or '— not set —' }}<br>
+          <span class="muted tiny">tray: {{ vendor.tray_colour or 'auto' }}</span></span></div>
+    {% else %}
+      <div class="kv-row"><span class="k">Printer</span>
+        <span class="v">{{ vendor.printer_single or '— not set —' }}<br>
+          <span class="muted tiny">tray: {{ vendor.tray_single or 'auto' }}</span></span></div>
+    {% endif %}
+    <p class="muted tiny" style="margin-top:.7rem;">Change these in the shop PC
+      app — “Save / Change Printer” updates this instantly.</p>
   </div>
+</div>
 
-  <div class="card">
-    <h2>Recent print jobs</h2>
+<!-- ---------- subscription ---------- -->
+<div class="card">
+  <div class="card-head">
+    <h2>Subscription</h2>
+    <span class="pill {{ 'pill-ok' if vendor.status == 'active'
+                        else 'pill-warn' if vendor.status == 'grace' else 'pill-bad' }}">
+      {{ vendor.status.replace('_',' ') }}</span>
+  </div>
+  {% if vendor.plan == 'lifetime' %}
+    <p class="muted">Lifetime plan — no renewals, ever.</p>
+  {% else %}
+    <p class="muted">{{ plans[vendor.plan].label }} · ₹{{ plans[vendor.plan].fee }} per
+      {{ 'month' if vendor.plan == 'monthly' else 'year' }}
+      {% if vendor.renews_at %}· renews {{ vendor.renews_at }}{% endif %}</p>
+    {% if vendor.status == 'grace' %}
+      <div class="note note-warn" style="margin-bottom:.8rem;">
+        Payment overdue — you're in the grace period until {{ vendor.grace_until }}.
+        Renew now to avoid suspension.</div>
+    {% elif vendor.status in ('suspended', 'rejected') %}
+      <div class="note note-bad" style="margin-bottom:.8rem;">
+        Your shop is offline. Renew to restore service.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('vendor_renew_online') }}">
+      <button type="submit" class="btn btn-success">Renew now — ₹{{ plans[vendor.plan].fee }}</button>
+    </form>
+  {% endif %}
+</div>
+
+<!-- ---------- jobs ---------- -->
+<div class="card">
+  <div class="card-head"><h2>Recent orders</h2></div>
+  <div class="table-scroll">
     <table>
-      <tr><th>#</th><th>Document</th><th>Customer</th><th>Mode</th>
-          <th>Copies</th><th>Price</th><th>Status</th><th>Created</th></tr>
+      <thead><tr><th>#</th><th>Document</th><th>Mode</th><th>Copies</th>
+                 <th>Amount</th><th>Status</th><th>When</th></tr></thead>
+      <tbody>
       {% for j in jobs %}
-      <tr>
-        <td>{{ j.id }}</td><td>{{ j.original_filename }}</td>
-        <td>{{ j.customer_name or '—' }}</td><td>{{ j.color_mode }}</td>
-        <td>{{ j.copies }}</td><td>₹{{ '%.2f' % j.price }}</td>
-        <td>{{ j.status }}</td><td class="muted">{{ j.created_at }}</td>
-      </tr>
+        <tr>
+          <td>{{ j.id }}</td>
+          <td>{{ j.original_filename }}</td>
+          <td>{{ 'Colour' if j.color_mode == 'color' else 'B/W' }}</td>
+          <td>{{ j.copies }}</td>
+          <td>₹{{ '%.2f'|format(j.price) }}</td>
+          <td><span class="pill {{ 'pill-ok' if j.status == 'printed'
+                                  else 'pill-info' if j.status == 'confirmed'
+                                  else 'pill-neutral' }}">{{ j.status.replace('_',' ') }}</span></td>
+          <td class="muted tiny">{{ j.created_at }}</td>
+        </tr>
       {% else %}
-      <tr><td colspan="8" class="muted">No jobs yet.</td></tr>
+        <tr><td colspan="7" class="empty">No orders yet — share your QR code to get started.</td></tr>
       {% endfor %}
+      </tbody>
     </table>
   </div>
+</div>
 
-  <div class="card">
-    <h2>Your payments</h2>
+<!-- ---------- payments ---------- -->
+<div class="card">
+  <div class="card-head"><h2>Your subscription payments</h2></div>
+  <div class="table-scroll">
     <table>
-      <tr><th>Date</th><th>Type</th><th>Plan</th><th>Amount</th><th>Method</th></tr>
+      <thead><tr><th>Date</th><th>Type</th><th>Plan</th><th>Amount</th><th>Method</th></tr></thead>
+      <tbody>
       {% for p in payments %}
-      <tr><td class="muted">{{ p.created_at }}</td><td>{{ p.kind }}</td>
-          <td>{{ p.plan or '—' }}</td><td>₹{{ '%.2f' % p.amount }}</td>
-          <td>{{ p.method }}</td></tr>
+        <tr><td class="muted tiny">{{ p.created_at }}</td><td>{{ p.kind }}</td>
+            <td>{{ p.plan or '—' }}</td><td>₹{{ '%.2f'|format(p.amount) }}</td>
+            <td>{{ p.method }}</td></tr>
       {% else %}
-      <tr><td colspan="5" class="muted">No payments recorded.</td></tr>
+        <tr><td colspan="5" class="empty">No payments yet.</td></tr>
       {% endfor %}
+      </tbody>
     </table>
   </div>
-</main>
-</body>
-</html>
+</div>
+{% endblock %}

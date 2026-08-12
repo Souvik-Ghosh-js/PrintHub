@@ -1,483 +1,508 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{{ vendor.shop_name }} — PrintHub</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"></script>
-  {% if online_pay %}<script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>{% endif %}
-  <style>
-    * { box-sizing: border-box; }
-    body { font-family: 'Segoe UI', system-ui, sans-serif; margin: 0;
-           background: #f2f4f8; color: #1c2333; }
-    header { background: #1c2a6e; color: #fff; padding: 14px 20px; }
-    header h1 { margin: 0; font-size: 1.2rem; }
-    header small { opacity: .8; }
-    main { max-width: 760px; margin: 20px auto; padding: 0 12px 60px; }
-    .card { background: #fff; border-radius: 10px; padding: 18px;
-            margin-bottom: 16px; box-shadow: 0 1px 4px rgba(20,30,80,.08); }
-    h2 { font-size: 1.02rem; margin: 0 0 12px; color: #1c2a6e; }
-    .tabs { display: flex; gap: 8px; flex-wrap: wrap; }
-    .tabs button { flex: 1; min-width: 110px; padding: 10px 6px; border: 1.5px solid #ccd3ea;
-                   background: #fff; border-radius: 8px; cursor: pointer; font-size: .92rem; }
-    .tabs button.active { background: #1c2a6e; color: #fff; border-color: #1c2a6e; }
+{% extends "base.html" %}
+{% block title %}{{ vendor.shop_name }} — Scan &amp; Print{% endblock %}
+{% block wrapclass %}wrap-narrow{% endblock %}
 
-    /* Page slots — wireframe layouts (spec §1) */
-    .slots { display: flex; gap: 14px; justify-content: center; align-items: center;
-             min-height: 190px; padding: 14px; background: #eef1f8;
-             border-radius: 10px; }
-    .slots.stacked { flex-direction: column; }
-    .slot { position: relative; width: 220px; height: 150px; background: #fff;
-            border: 1.5px dashed #9aa7d6; border-radius: 8px; display: flex;
-            align-items: center; justify-content: center; overflow: hidden;
-            cursor: pointer; }
-    .slots.stacked .slot { width: 300px; height: 130px; }
-    .slot img { max-width: 100%; max-height: 100%; }
-    .slot .hint { color: #6a76a8; font-size: .85rem; text-align: center; padding: 8px; }
-    .slot .del { position: absolute; top: 4px; left: 4px; width: 24px; height: 24px;
-                 border-radius: 50%; border: none; background: #d63333; color: #fff;
-                 font-weight: bold; cursor: pointer; display: none; line-height: 1; }
-    .slot.filled { border-style: solid; border-color: #d63333; }
-    .slot.filled .del { display: block; }
+{% block head %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"></script>
+<script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
+<style>
+  /* ---------- shop header ---------- */
+  .shop-hero { display: flex; align-items: center; gap: .85rem; margin-bottom: 1.1rem; }
+  .shop-avatar {
+    width: 46px; height: 46px; border-radius: 13px; flex: none; display: grid;
+    place-items: center; font-size: 1.3rem; color: #fff;
+    background: linear-gradient(135deg, var(--brand-500), var(--brand-700));
+  }
+  .shop-hero h1 { margin: 0; font-size: 1.3rem; }
+  .rates { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .2rem; }
 
-    .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center;
-           margin: 10px 0; }
-    label { font-size: .9rem; }
-    select, input[type=number], input[type=text] {
-      padding: 8px; border: 1px solid #ccd3ea; border-radius: 6px; font-size: .92rem; }
-    .price { font-size: 1.25rem; font-weight: 700; color: #1c2a6e; }
-    .actions button { padding: 12px 22px; border: none; border-radius: 8px;
-                      font-size: 1rem; cursor: pointer; }
-    #preview-btn { background: #e8ebf7; color: #1c2a6e; }
-    #order-btn { background: #1c8a3c; color: #fff; }
-    button:disabled { opacity: .55; cursor: not-allowed; }
+  /* ---------- format chooser ---------- */
+  .formats { display: grid; grid-template-columns: repeat(4, 1fr); gap: .55rem; }
+  @media (max-width: 560px) { .formats { grid-template-columns: repeat(2, 1fr); } }
+  .fmt {
+    display: flex; flex-direction: column; align-items: center; gap: .3rem;
+    padding: .8rem .4rem; border: 1.5px solid var(--line); border-radius: var(--r);
+    background: var(--surface); cursor: pointer; font: inherit; font-size: .8rem;
+    font-weight: 600; color: var(--ink-2); text-align: center;
+    transition: border-color .15s, background .15s, transform .12s;
+  }
+  .fmt:hover { border-color: var(--brand-300); }
+  .fmt.on {
+    border-color: var(--brand-600); background: var(--brand-50);
+    color: var(--brand-700); box-shadow: var(--focus);
+  }
+  .fmt-ico { font-size: 1.35rem; }
 
-    /* Crop modal */
-    #crop-modal { position: fixed; inset: 0; background: rgba(15,20,40,.75);
-                  display: none; align-items: center; justify-content: center; z-index: 50; }
-    #crop-modal .box { background: #fff; border-radius: 10px; padding: 14px;
-                       width: min(680px, 94vw); }
-    #crop-stage { max-height: 55vh; }
-    #crop-img { max-width: 100%; display: block; }
-    #crop-detect-note { font-size: .82rem; color: #5a6491; min-height: 1.2em; margin: 6px 0; }
-    #doc-pages { display: flex; gap: 10px; flex-wrap: wrap; }
-    #doc-pages .slot { width: 130px; height: 170px; }
-    .muted { color: #6a76a8; font-size: .85rem; }
+  /* ---------- page slots ---------- */
+  /* nowrap keeps front+back side by side even on a 360px screen */
+  .slots { display: flex; gap: .8rem; justify-content: center; flex-wrap: nowrap; }
+  .slots.stacked { flex-direction: column; align-items: center; }
+  .slot {
+    position: relative; width: 190px; aspect-ratio: 22 / 15;
+    border: 2px dashed var(--line); border-radius: var(--r);
+    background: var(--surface-2); display: grid; place-items: center;
+    cursor: pointer; overflow: hidden; padding: .5rem; text-align: center;
+    transition: border-color .15s, background .15s;
+  }
+  .slots.stacked .slot { width: 260px; aspect-ratio: 30 / 13; }
+  .slot:hover { border-color: var(--brand-300); background: var(--brand-50); }
+  .slot.filled { border-style: solid; border-color: var(--brand-500); padding: 0;
+                 background: var(--surface); }
+  .slot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .slot-hint { color: var(--muted); font-size: .78rem; font-weight: 600;
+               display: grid; gap: .2rem; }
+  .slot-hint .plus { font-size: 1.5rem; color: var(--brand-500); line-height: 1; }
+  .slot .del {
+    position: absolute; top: 6px; right: 6px; width: 26px; height: 26px;
+    border-radius: 50%; border: none; background: rgba(15,23,42,.72); color: #fff;
+    font-size: .8rem; font-weight: 700; cursor: pointer; display: none;
+    align-items: center; justify-content: center; backdrop-filter: blur(4px);
+  }
+  .slot.filled .del { display: flex; }
+  .slot .del:hover { background: var(--bad); }
+  @media (max-width: 560px) {
+    .slot { width: 42vw; }
+    .slots.stacked .slot { width: 76vw; }
+    .slot-hint { font-size: .72rem; }
+  }
+  #doc-pages { display: flex; gap: .6rem; flex-wrap: wrap; }
+  #doc-pages .slot { width: 104px; aspect-ratio: 3 / 4; }
 
-    /* ---------- mobile (the page customers reach by scanning the QR) ---------- */
-    @media (max-width: 520px) {
-      main { margin: 12px auto; padding: 0 8px 40px; }
-      .card { padding: 14px; }
-      /* Two ID slots must fit side by side on a ~360px screen. */
-      .slots { gap: 8px; padding: 10px; }
-      .slot { width: 42vw; max-width: 220px; height: auto; aspect-ratio: 22/15; }
-      .slots.stacked .slot { width: 78vw; max-width: 300px; aspect-ratio: 30/13; }
-      #doc-pages .slot { width: 28vw; height: auto; aspect-ratio: 13/17; }
-      /* 16px stops iOS Safari from auto-zooming into focused fields. */
-      select, input[type=number], input[type=text] { font-size: 16px; }
-      .row { gap: 10px; }
-      .row label { flex: 1 1 100%; }
-      .actions { display: flex; gap: 8px; width: 100%; }
-      .actions button { flex: 1; padding: 12px 8px; }
-      .price { font-size: 1.15rem; }
-      #crop-modal .box { padding: 10px; }
-      #crop-stage { max-height: 48vh; }
-    }
-  </style>
-</head>
-<body>
-<header>
-  <h1>{{ vendor.shop_name }}</h1>
-  <small>Scan &amp; print — B/W ₹{{ '%.2f' % vendor.price_bw }}/page ·
-         Colour ₹{{ '%.2f' % vendor.price_colour }}/page</small>
-</header>
-<main>
-  <div class="card">
-    <h2>1 · Choose document type</h2>
-    <div class="tabs" id="format-tabs">
-      {% for key, fmt in formats.items() %}
-      <button data-format="{{ key }}" data-layout="{{ fmt.layout }}">{{ fmt.label }}</button>
-      {% endfor %}
-      <button data-format="document" data-layout="pages">Document scan</button>
-    </div>
-  </div>
+  /* ---------- summary bar (fixed to the bottom of the viewport) ---------- */
+  .summary {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 25;
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    backdrop-filter: blur(12px); border-top: 1px solid var(--line);
+    box-shadow: 0 -6px 24px rgba(15, 23, 42, .09);
+    padding: .8rem 1rem calc(.8rem + env(safe-area-inset-bottom));
+  }
+  .summary-in {
+    max-width: 760px; margin: 0 auto;
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  }
+  .total-amt { font-size: 1.5rem; font-weight: 750; letter-spacing: -.02em; }
+  /* keep the last card clear of the fixed bar */
+  body { padding-bottom: 96px; }
+  .foot { display: none; }
+  @media (max-width: 560px) {
+    .summary-in .btn { padding: .7rem .9rem; font-size: .9rem; }
+    .total-amt { font-size: 1.3rem; }
+  }
 
-  <div class="card" id="id-panel">
-    <h2>2 · Add pages <span class="muted" id="layout-note"></span></h2>
-    <div class="slots" id="id-slots">
-      <div class="slot" id="slot-front" data-side="front">
-        <button class="del" title="Delete page">✕</button>
-        <span class="hint">Page 1 (Front)<br>tap to scan</span>
-      </div>
-      <div class="slot" id="slot-back" data-side="back">
-        <button class="del" title="Delete page">✕</button>
-        <span class="hint">Page 2 (Back)<br>tap to scan</span>
-      </div>
-    </div>
-    <p class="muted">Each page has its own ✕ — deleting one auto-centres the
-      remaining page. A single page prints centred on the sheet.</p>
-  </div>
+  /* ---------- crop modal ---------- */
+  #crop-stage { max-height: 54vh; background: var(--surface-2);
+                border-radius: var(--r-sm); overflow: hidden; }
+  #crop-img { max-width: 100%; display: block; }
+  .detect-note { font-size: .8rem; color: var(--muted); min-height: 1.2em;
+                 margin: .6rem 0; display: flex; align-items: center; gap: .4rem; }
 
-  <div class="card" id="doc-panel" style="display:none;">
-    <h2>2 · Add pages</h2>
-    <div id="doc-pages"></div>
-    <p><button type="button" id="add-page-btn">＋ Add page</button></p>
-  </div>
+  /* ---------- payment overlay ---------- */
+  .pay-state { text-align: center; padding: 1.5rem 1rem; }
+  .pay-state .big { font-size: 2.6rem; line-height: 1; margin-bottom: .6rem; }
+</style>
+{% endblock %}
 
-  <div class="card">
-    <h2>3 · Enhance &amp; options</h2>
-    <div class="row">
-      <label>Light / Burn filter
-        <select id="enhance-mode">
-          <option value="none">Original</option>
-          <option value="color">Enhanced colour (shadow removal)</option>
-          <option value="gray">Grayscale scan</option>
-          <option value="bw">B&amp;W scan</option>
-        </select>
-      </label>
-      <label>Print
-        <select id="color-mode">
-          <option value="bw">Black &amp; White</option>
-          <option value="color">Colour</option>
-        </select>
-      </label>
-      <label>Copies <input type="number" id="copies" value="1" min="1" max="50" style="width:70px"></label>
-    </div>
-    <div class="row">
-      <label>Your name <input type="text" id="customer-name" placeholder="For the shop counter"></label>
-      {% if online_pay %}
-      <label>Payment
-        <select id="pay-mode">
-          <option value="online">Pay online (UPI / card)</option>
-          <option value="counter">Pay at the counter</option>
-        </select>
-      </label>
-      {% endif %}
-    </div>
-  </div>
+{% block brandsub %}{% endblock %}
+{% block nav %}<span class="muted tiny">Secure payment by Cashfree</span>{% endblock %}
 
-  <div class="card">
-    <div class="row" style="justify-content:space-between;">
-      <div>Total: <span class="price" id="price">₹0.00</span>
-        <span class="muted" id="price-note"></span></div>
-      <div class="actions">
-        <button type="button" id="preview-btn">Preview PDF</button>
-        <button type="button" id="order-btn" disabled>Place order</button>
-      </div>
-    </div>
-    <p class="muted" id="order-result"></p>
-  </div>
-</main>
-
-<!-- Crop editor: AI auto-cut pre-fills the box; drag handles to fine-tune -->
-<div id="crop-modal">
-  <div class="box">
-    <h2 style="margin-top:0;">Adjust the crop</h2>
-    <div id="crop-stage"><img id="crop-img" alt=""></div>
-    <div id="crop-detect-note">Detecting document…</div>
-    <div class="row" style="justify-content:flex-end;">
-      <button type="button" id="crop-cancel">Cancel</button>
-      <button type="button" id="crop-done" style="background:#1c2a6e;color:#fff;">Use this crop</button>
+{% block content %}
+<div class="shop-hero">
+  <div class="shop-avatar">🖨</div>
+  <div>
+    <h1>{{ vendor.shop_name }}</h1>
+    <div class="rates">
+      <span class="pill pill-neutral">B/W ₹{{ '%.2f'|format(vendor.price_bw) }}/page</span>
+      <span class="pill pill-neutral">Colour ₹{{ '%.2f'|format(vendor.price_colour) }}/page</span>
     </div>
   </div>
 </div>
 
-<input type="file" id="file-input" accept="image/*" style="display:none;">
+<div class="card">
+  <div class="step"><span class="step-n">1</span><h2>What are you printing?</h2></div>
+  <div class="formats" id="formats">
+    {% for key, fmt in formats.items() %}
+    <button type="button" class="fmt" data-format="{{ key }}" data-layout="{{ fmt.layout }}">
+      <span class="fmt-ico">{{ '🆔' if key == 'aadhaar' else ('💳' if key == 'pan' else '🗳️') }}</span>
+      {{ fmt.label }}
+    </button>
+    {% endfor %}
+    <button type="button" class="fmt" data-format="document" data-layout="pages">
+      <span class="fmt-ico">📄</span>Document
+    </button>
+  </div>
+</div>
 
+<div class="card" id="id-panel">
+  <div class="step"><span class="step-n">2</span><h2>Add your pages</h2></div>
+  <div class="slots" id="id-slots">
+    <div class="slot" id="slot-front" data-side="front">
+      <button type="button" class="del" title="Remove">✕</button>
+      <span class="slot-hint"><span class="plus">＋</span>Front side<br><span class="tiny">tap to scan</span></span>
+    </div>
+    <div class="slot" id="slot-back" data-side="back">
+      <button type="button" class="del" title="Remove">✕</button>
+      <span class="slot-hint"><span class="plus">＋</span>Back side<br><span class="tiny">tap to scan</span></span>
+    </div>
+  </div>
+  <p class="muted tiny center" style="margin:.8rem 0 0;" id="layout-note"></p>
+</div>
+
+<div class="card" id="doc-panel" hidden>
+  <div class="step"><span class="step-n">2</span><h2>Add your pages</h2></div>
+  <div id="doc-pages"></div>
+  <button type="button" class="btn btn-ghost btn-sm" id="add-page-btn"
+          style="margin-top:.8rem;">＋ Add a page</button>
+</div>
+
+<div class="card">
+  <div class="step"><span class="step-n">3</span><h2>Print options</h2></div>
+  <div class="field-row">
+    <div class="field">
+      <label for="color-mode">Print in</label>
+      <select id="color-mode">
+        <option value="bw">Black &amp; White — ₹{{ '%.2f'|format(vendor.price_bw) }}/page</option>
+        <option value="color">Colour — ₹{{ '%.2f'|format(vendor.price_colour) }}/page</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="copies">Copies</label>
+      <input type="number" id="copies" value="1" min="1" max="50">
+    </div>
+  </div>
+  <div class="field-row" style="margin-top:.85rem;">
+    <div class="field">
+      <label for="enhance-mode">Scan quality</label>
+      <select id="enhance-mode">
+        <option value="color">Enhanced — remove shadows</option>
+        <option value="gray">Grayscale scan</option>
+        <option value="bw">High-contrast B&amp;W</option>
+        <option value="none">Original photo</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="customer-phone">Mobile number <span class="muted">(for the receipt)</span></label>
+      <input type="tel" id="customer-phone" inputmode="numeric" placeholder="10-digit number">
+    </div>
+  </div>
+</div>
+
+<div class="summary">
+  <div class="summary-in">
+    <div>
+      <div class="muted tiny" id="price-note">Add a page to see the price</div>
+      <div class="total-amt" id="price">₹0.00</div>
+    </div>
+    <div class="btn-row" style="flex-wrap:nowrap;">
+      <button type="button" class="btn btn-ghost" id="preview-btn">Preview</button>
+      <button type="button" class="btn btn-success btn-lg" id="order-btn" disabled>Pay &amp; Print</button>
+    </div>
+  </div>
+</div>
+
+<!-- crop editor -->
+<div class="modal" id="crop-modal">
+  <div class="modal-box">
+    <h2>Adjust the crop</h2>
+    <div id="crop-stage"><img id="crop-img" alt=""></div>
+    <div class="detect-note" id="crop-detect-note"></div>
+    <div class="btn-row" style="justify-content:flex-end;">
+      <button type="button" class="btn btn-ghost" id="crop-cancel">Cancel</button>
+      <button type="button" class="btn btn-primary" id="crop-done">Use this crop</button>
+    </div>
+  </div>
+</div>
+
+<!-- payment status -->
+<div class="modal" id="pay-modal">
+  <div class="modal-box" style="max-width:420px;">
+    <div class="pay-state" id="pay-state">
+      <div class="spinner"></div>
+      <h2 style="margin-top:1rem;">Waiting for payment…</h2>
+      <p class="muted">Complete the payment in the window that opened.
+        Your document prints automatically once it succeeds.</p>
+    </div>
+    <button type="button" class="btn btn-ghost btn-block" id="pay-close" hidden>Done</button>
+  </div>
+</div>
+
+<input type="file" id="file-input" accept="image/*" hidden>
+{% endblock %}
+
+{% block scripts %}
 <script>
-  const PRICES = { bw: {{ vendor.price_bw }}, color: {{ vendor.price_colour }} };
-  const SHOP = "{{ vendor.shop_code }}";
+const PRICES = { bw: {{ vendor.price_bw }}, color: {{ vendor.price_colour }} };
+const SHOP = "{{ vendor.shop_code }}";
 
-  const state = {
-    format: "aadhaar", layout: "side_by_side",
-    sides: { front: null, back: null },   // {blob, url} — cropped originals
-    pages: [],                            // document mode
-  };
+const state = { format: "aadhaar", layout: "side_by_side",
+                sides: { front: null, back: null }, pages: [] };
+const $ = (id) => document.getElementById(id);
 
-  // ---------- format tabs ----------
-  const tabs = document.querySelectorAll("#format-tabs button");
-  tabs.forEach(btn => btn.addEventListener("click", () => {
-    tabs.forEach(b => b.classList.remove("active"));
-    btn.classList.add("active");
-    state.format = btn.dataset.format;
-    state.layout = btn.dataset.layout;
-    const isDoc = state.format === "document";
-    document.getElementById("id-panel").style.display = isDoc ? "none" : "block";
-    document.getElementById("doc-panel").style.display = isDoc ? "block" : "none";
-    const slots = document.getElementById("id-slots");
-    slots.classList.toggle("stacked", state.layout === "stacked");
-    document.getElementById("layout-note").textContent =
-      state.layout === "stacked" ? "(front above, back below)"
-      : state.layout === "side_by_side" ? "(front and back side by side)" : "";
-    updatePrice();
-  }));
-  tabs[0].click();
+/* ---------------- format chooser ---------------- */
+const fmtBtns = document.querySelectorAll("#formats .fmt");
+fmtBtns.forEach(btn => btn.addEventListener("click", () => {
+  fmtBtns.forEach(b => b.classList.remove("on"));
+  btn.classList.add("on");
+  state.format = btn.dataset.format;
+  state.layout = btn.dataset.layout;
+  const isDoc = state.format === "document";
+  $("id-panel").hidden = isDoc;
+  $("doc-panel").hidden = !isDoc;
+  $("id-slots").classList.toggle("stacked", state.layout === "stacked");
+  $("layout-note").textContent = isDoc ? ""
+    : state.layout === "stacked"
+      ? "Both sides print stacked on one A4 sheet, at real card size."
+      : "Both sides print side by side on one A4 sheet, at real card size.";
+  updatePrice();
+}));
+fmtBtns[0].click();
 
-  // ---------- crop editor with AI auto-cut ----------
-  let cropper = null, cropCallback = null;
-  const modal = document.getElementById("crop-modal");
-  const cropImg = document.getElementById("crop-img");
-  const detectNote = document.getElementById("crop-detect-note");
+/* ---------------- crop editor + AI auto-cut ---------------- */
+let cropper = null, cropCallback = null;
+const cropModal = $("crop-modal"), cropImg = $("crop-img"), detectNote = $("crop-detect-note");
+const MAX_DIM = 1400;
 
-  const MAX_DIM = 1400;      // downscale huge phone photos (prototype fix)
-  function downscale(dataUrl) {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        let { width: w, height: h } = img;
-        if (w <= MAX_DIM && h <= MAX_DIM) return resolve(dataUrl);
-        const s = MAX_DIM / Math.max(w, h);
-        const c = document.createElement("canvas");
-        c.width = Math.round(w * s); c.height = Math.round(h * s);
-        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-        resolve(c.toDataURL("image/jpeg", 0.9));
-      };
-      img.onerror = () => resolve(dataUrl);
-      img.src = dataUrl;
-    });
-  }
-
-  // Server-side auto-detect (ML model with classical-CV fallback); logs the
-  // source in the console. Failure => keep Cropper.js's default box.
-  async function autoDetect(dataUrl) {
-    try {
-      const blob = await (await fetch(dataUrl)).blob();
-      const fd = new FormData();
-      fd.append("file", blob, "page.jpg");
-      const r = await fetch("/api/detect_document", { method: "POST", body: fd });
-      const d = await r.json();
-      if (d.ok && Array.isArray(d.corners)) {
-        const xs = d.corners.map(c => c[0]), ys = d.corners.map(c => c[1]);
-        const x = Math.max(0, Math.min(...xs)), y = Math.max(0, Math.min(...ys));
-        cropper.setData({ x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y });
-        const src = d.detector === "ml" ? "ML model" : "classical CV fallback";
-        console.log(`[auto-cut] crop box from ${src} (confidence ${d.confidence})`);
-        detectNote.textContent = `Auto-cut by ${src} — drag the handles to fine-tune.`;
-      } else {
-        console.log(`[auto-cut] skipped (${d.reason || "unknown"}) — using Cropper.js default box`);
-        detectNote.textContent = "Could not auto-detect — adjust the box manually.";
-      }
-    } catch (err) {
-      console.log("[auto-cut] failed — using Cropper.js default box", err);
-      detectNote.textContent = "Auto-detect unavailable — adjust the box manually.";
-    }
-  }
-
-  function openCropper(file, callback) {
-    cropCallback = callback;
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const dataUrl = await downscale(e.target.result);
-      cropImg.src = dataUrl;
-      modal.style.display = "flex";
-      detectNote.textContent = "Detecting document…";
-      if (cropper) cropper.destroy();
-      cropper = new Cropper(cropImg, {
-        viewMode: 0, autoCropArea: 0.8, background: false,
-        movable: true, zoomable: false, rotatable: true,
-        ready() { autoDetect(dataUrl); },
-      });
+function downscale(dataUrl) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      let { width: w, height: h } = img;
+      if (w <= MAX_DIM && h <= MAX_DIM) return resolve(dataUrl);
+      const s = MAX_DIM / Math.max(w, h);
+      const c = document.createElement("canvas");
+      c.width = Math.round(w * s); c.height = Math.round(h * s);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      resolve(c.toDataURL("image/jpeg", 0.9));
     };
-    reader.readAsDataURL(file);
-  }
-
-  document.getElementById("crop-cancel").addEventListener("click", () => {
-    modal.style.display = "none";
-    if (cropper) { cropper.destroy(); cropper = null; }
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
   });
+}
 
-  document.getElementById("crop-done").addEventListener("click", () => {
-    if (!cropper) return;
-    cropper.getCroppedCanvas({ maxWidth: 1400, maxHeight: 1400,
-                               imageSmoothingQuality: "high" })
-      .toBlob((blob) => {
-        modal.style.display = "none";
-        cropper.destroy(); cropper = null;
-        if (blob && cropCallback) cropCallback({ blob, url: URL.createObjectURL(blob) });
-      }, "image/jpeg", 0.92);
-  });
-
-  // ---------- ID slots (front/back with per-page delete + auto-centre) ----------
-  const fileInput = document.getElementById("file-input");
-  let pendingTarget = null;   // "front" | "back" | "newpage"
-
-  function pickFile(target) {
-    pendingTarget = target;
-    fileInput.value = "";
-    fileInput.click();
-  }
-
-  fileInput.addEventListener("change", () => {
-    const f = fileInput.files[0];
-    if (!f) return;
-    openCropper(f, (page) => {
-      if (pendingTarget === "newpage") {
-        state.pages.push(page);
-        renderDocPages();
-      } else {
-        state.sides[pendingTarget] = page;
-        renderSlot(pendingTarget);
-      }
-      updatePrice();
-    });
-  });
-
-  function renderSlot(side) {
-    const slot = document.getElementById("slot-" + side);
-    const page = state.sides[side];
-    const hint = slot.querySelector(".hint");
-    let img = slot.querySelector("img");
-    if (page) {
-      slot.classList.add("filled");
-      hint.style.display = "none";
-      if (!img) { img = document.createElement("img"); slot.appendChild(img); }
-      img.src = page.url;
-    } else {
-      slot.classList.remove("filled");
-      hint.style.display = "";
-      if (img) img.remove();
-    }
-    // Auto-centre: hide an empty slot only if the OTHER side is filled
-    // (spec §2 — remaining page moves to the centre of the frame).
-    const other = side === "front" ? "back" : "front";
-    slot.style.display = (!page && state.sides[other]) ? "none" : "flex";
-    const otherSlot = document.getElementById("slot-" + other);
-    otherSlot.style.display = (!state.sides[other] && page) ? "none" : "flex";
-  }
-
-  ["front", "back"].forEach(side => {
-    const slot = document.getElementById("slot-" + side);
-    slot.addEventListener("click", (e) => {
-      if (e.target.classList.contains("del")) return;
-      pickFile(side);
-    });
-    slot.querySelector(".del").addEventListener("click", () => {
-      state.sides[side] = null;
-      renderSlot(side); renderSlot(side === "front" ? "back" : "front");
-      updatePrice();
-    });
-  });
-
-  // ---------- document mode pages ----------
-  document.getElementById("add-page-btn")
-    .addEventListener("click", () => pickFile("newpage"));
-
-  function renderDocPages() {
-    const wrap = document.getElementById("doc-pages");
-    wrap.innerHTML = "";
-    state.pages.forEach((p, i) => {
-      const div = document.createElement("div");
-      div.className = "slot filled";
-      div.innerHTML = `<button class="del">✕</button><img src="${p.url}">`;
-      div.querySelector(".del").addEventListener("click", () => {
-        state.pages.splice(i, 1);
-        renderDocPages(); updatePrice();
-      });
-      wrap.appendChild(div);
-    });
-  }
-
-  // ---------- price + submit ----------
-  function pageCount() {
-    if (state.format === "document") return state.pages.length;
-    return (state.sides.front || state.sides.back) ? 1 : 0;
-  }
-
-  function updatePrice() {
-    const mode = document.getElementById("color-mode").value;
-    const copies = Math.max(1, +document.getElementById("copies").value || 1);
-    const pages = pageCount();
-    const total = PRICES[mode] * pages * copies;
-    document.getElementById("price").textContent = "₹" + total.toFixed(2);
-    document.getElementById("price-note").textContent =
-      pages ? `(${pages} page${pages > 1 ? "s" : ""} × ${copies} cop${copies > 1 ? "ies" : "y"})` : "";
-    document.getElementById("order-btn").disabled = pages === 0;
-  }
-  document.getElementById("color-mode").addEventListener("change", updatePrice);
-  document.getElementById("copies").addEventListener("input", updatePrice);
-
-  const ONLINE_PAY = {{ 'true' if online_pay else 'false' }};
-
-  function buildForm() {
+async function autoDetect(dataUrl) {
+  try {
+    const blob = await (await fetch(dataUrl)).blob();
     const fd = new FormData();
-    const payModeSel = document.getElementById("pay-mode");
-    fd.append("pay_mode", (ONLINE_PAY && payModeSel) ? payModeSel.value : "counter");
-    fd.append("doc_format", state.format);
-    fd.append("enhance_mode", document.getElementById("enhance-mode").value);
-    fd.append("color_mode", document.getElementById("color-mode").value);
-    fd.append("copies", document.getElementById("copies").value || "1");
-    fd.append("customer_name", document.getElementById("customer-name").value);
-    if (state.format === "document") {
-      state.pages.forEach((p, i) => fd.append("pages", p.blob, `page${i + 1}.jpg`));
+    fd.append("file", blob, "page.jpg");
+    const d = await (await fetch("/api/detect_document", { method: "POST", body: fd })).json();
+    if (d.ok && Array.isArray(d.corners)) {
+      const xs = d.corners.map(c => c[0]), ys = d.corners.map(c => c[1]);
+      const x = Math.max(0, Math.min(...xs)), y = Math.max(0, Math.min(...ys));
+      cropper.setData({ x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y });
+      detectNote.innerHTML = "✨ Edges detected automatically — drag to fine-tune.";
     } else {
-      if (state.sides.front) fd.append("front", state.sides.front.blob, "front.jpg");
-      if (state.sides.back) fd.append("back", state.sides.back.blob, "back.jpg");
+      detectNote.textContent = "Drag the handles to frame your document.";
     }
-    return fd;
+  } catch (e) {
+    detectNote.textContent = "Drag the handles to frame your document.";
   }
+}
 
-  document.getElementById("preview-btn").addEventListener("click", async () => {
-    if (pageCount() === 0) { alert("Add at least one page first."); return; }
+function openCropper(file, cb) {
+  cropCallback = cb;
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    const dataUrl = await downscale(e.target.result);
+    cropImg.src = dataUrl;
+    cropModal.classList.add("open");
+    detectNote.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;margin:0;"></span> Detecting edges…';
+    if (cropper) cropper.destroy();
+    cropper = new Cropper(cropImg, {
+      viewMode: 0, autoCropArea: 0.8, background: false,
+      movable: true, zoomable: false, rotatable: true,
+      ready() { autoDetect(dataUrl); },
+    });
+  };
+  reader.readAsDataURL(file);
+}
+
+$("crop-cancel").addEventListener("click", () => {
+  cropModal.classList.remove("open");
+  if (cropper) { cropper.destroy(); cropper = null; }
+});
+$("crop-done").addEventListener("click", () => {
+  if (!cropper) return;
+  cropper.getCroppedCanvas({ maxWidth: 1400, maxHeight: 1400, imageSmoothingQuality: "high" })
+    .toBlob(blob => {
+      cropModal.classList.remove("open");
+      cropper.destroy(); cropper = null;
+      if (blob && cropCallback) cropCallback({ blob, url: URL.createObjectURL(blob) });
+    }, "image/jpeg", 0.92);
+});
+
+/* ---------------- page slots ---------------- */
+const fileInput = $("file-input");
+let pendingTarget = null;
+
+function pickFile(target) { pendingTarget = target; fileInput.value = ""; fileInput.click(); }
+
+fileInput.addEventListener("change", () => {
+  const f = fileInput.files[0];
+  if (!f) return;
+  openCropper(f, (page) => {
+    if (pendingTarget === "newpage") { state.pages.push(page); renderDocPages(); }
+    else { state.sides[pendingTarget] = page; renderSlot("front"); renderSlot("back"); }
+    updatePrice();
+  });
+});
+
+function renderSlot(side) {
+  const slot = $("slot-" + side), page = state.sides[side];
+  const hint = slot.querySelector(".slot-hint");
+  let img = slot.querySelector("img");
+  if (page) {
+    slot.classList.add("filled");
+    hint.hidden = true;
+    if (!img) { img = document.createElement("img"); slot.appendChild(img); }
+    img.src = page.url;
+  } else {
+    slot.classList.remove("filled");
+    hint.hidden = false;
+    if (img) img.remove();
+  }
+  // Auto-centre: hide the empty slot when the other side is filled (spec §2).
+  const other = side === "front" ? "back" : "front";
+  slot.hidden = !page && !!state.sides[other];
+}
+
+["front", "back"].forEach(side => {
+  const slot = $("slot-" + side);
+  slot.addEventListener("click", e => {
+    if (e.target.classList.contains("del")) return;
+    pickFile(side);
+  });
+  slot.querySelector(".del").addEventListener("click", () => {
+    state.sides[side] = null;
+    renderSlot("front"); renderSlot("back");
+    updatePrice();
+  });
+});
+
+$("add-page-btn").addEventListener("click", () => pickFile("newpage"));
+
+function renderDocPages() {
+  const wrap = $("doc-pages");
+  wrap.innerHTML = "";
+  state.pages.forEach((p, i) => {
+    const div = document.createElement("div");
+    div.className = "slot filled";
+    div.innerHTML = `<button type="button" class="del">✕</button>`;
+    const img = document.createElement("img");
+    img.src = p.url;
+    div.appendChild(img);
+    div.querySelector(".del").addEventListener("click", (e) => {
+      e.stopPropagation();
+      state.pages.splice(i, 1); renderDocPages(); updatePrice();
+    });
+    wrap.appendChild(div);
+  });
+}
+
+/* ---------------- price ---------------- */
+function pageCount() {
+  return state.format === "document" ? state.pages.length
+    : ((state.sides.front || state.sides.back) ? 1 : 0);
+}
+function updatePrice() {
+  const mode = $("color-mode").value;
+  const copies = Math.max(1, +$("copies").value || 1);
+  const pages = pageCount();
+  const total = PRICES[mode] * pages * copies;
+  $("price").textContent = "₹" + total.toFixed(2);
+  $("price-note").textContent = pages
+    ? `${pages} page${pages > 1 ? "s" : ""} × ${copies} cop${copies > 1 ? "ies" : "y"}`
+    : "Add a page to see the price";
+  $("order-btn").disabled = pages === 0;
+  $("preview-btn").disabled = pages === 0;
+}
+$("color-mode").addEventListener("change", updatePrice);
+$("copies").addEventListener("input", updatePrice);
+updatePrice();
+
+/* ---------------- submit + pay ---------------- */
+function buildForm() {
+  const fd = new FormData();
+  fd.append("doc_format", state.format);
+  fd.append("enhance_mode", $("enhance-mode").value);
+  fd.append("color_mode", $("color-mode").value);
+  fd.append("copies", $("copies").value || "1");
+  fd.append("customer_phone", $("customer-phone").value || "");
+  if (state.format === "document") {
+    state.pages.forEach((p, i) => fd.append("pages", p.blob, `page${i + 1}.jpg`));
+  } else {
+    if (state.sides.front) fd.append("front", state.sides.front.blob, "front.jpg");
+    if (state.sides.back) fd.append("back", state.sides.back.blob, "back.jpg");
+  }
+  return fd;
+}
+
+$("preview-btn").addEventListener("click", async () => {
+  const btn = $("preview-btn"), label = btn.textContent;
+  btn.disabled = true; btn.textContent = "Building…";
+  try {
     const r = await fetch(`/shop/${SHOP}/preview`, { method: "POST", body: buildForm() });
-    if (!r.ok) { alert("Preview failed."); return; }
+    if (!r.ok) throw new Error("preview failed");
     window.open(URL.createObjectURL(await r.blob()), "_blank");
-  });
+  } catch (e) {
+    alert("Could not build the preview. Please try again.");
+  } finally { btn.disabled = false; btn.textContent = label; updatePrice(); }
+});
 
-  // Online payment: open the Cashfree checkout (this SHOP's own Cashfree
-  // account) and poll the server until the payment is confirmed.
-  let payPoll = null;
-  function startPaymentPolling(orderId, jobId, price) {
-    const out = document.getElementById("order-result");
-    if (payPoll) clearInterval(payPoll);
-    let ticks = 0;
-    payPoll = setInterval(async () => {
-      ticks++;
-      try {
-        const r = await fetch(`/shop/${SHOP}/payment-status/${orderId}`);
-        const d = await r.json();
-        if (d.status === "paid") {
-          clearInterval(payPoll); payPoll = null;
-          out.textContent = `✅ Payment received — order #${jobId} ` +
-            `(₹${price.toFixed(2)}) is printing now.`;
-        } else if (d.status === "failed") {
-          clearInterval(payPoll); payPoll = null;
-          out.textContent = `❌ Payment failed for order #${jobId}. ` +
-            `You can pay ₹${price.toFixed(2)} at the counter instead.`;
-        }
-      } catch (e) { /* transient network error — keep polling */ }
-      if (ticks > 100) { clearInterval(payPoll); payPoll = null; }
-    }, 3000);
-  }
+const payModal = $("pay-modal"), payState = $("pay-state"), payClose = $("pay-close");
+payClose.addEventListener("click", () => location.reload());
 
-  document.getElementById("order-btn").addEventListener("click", async () => {
-    const btn = document.getElementById("order-btn");
-    const out = document.getElementById("order-result");
-    btn.disabled = true; btn.textContent = "Placing…";
+function showPayResult(ok, title, msg) {
+  payState.innerHTML =
+    `<div class="big">${ok ? "✅" : "⚠️"}</div><h2>${title}</h2><p class="muted">${msg}</p>`;
+  payClose.hidden = false;
+  payClose.textContent = ok ? "Print another document" : "Try again";
+}
+
+let poll = null;
+function pollPayment(orderId, jobId, price) {
+  let ticks = 0;
+  poll = setInterval(async () => {
+    ticks++;
     try {
-      const r = await fetch(`/shop/${SHOP}/order`, { method: "POST", body: buildForm() });
-      const d = await r.json();
-      if (d.ok && d.pay_mode === "online") {
-        out.textContent = `Order #${d.job_id} created — complete the ` +
-          `₹${d.price.toFixed(2)} payment to start printing.`;
-        const cf = new Cashfree({ mode: d.cf_env });
-        cf.checkout({ paymentSessionId: d.payment_session_id,
-                      redirectTarget: "_modal" });
-        startPaymentPolling(d.order_id, d.job_id, d.price);
-      } else if (d.ok) {
-        out.textContent =
-          `✅ Order #${d.job_id} placed — pay ₹${d.price.toFixed(2)} at the counter. ` +
-          `The shop is printing it now.` + (d.note ? ` (${d.note})` : "");
-      } else {
-        out.textContent = "❌ " + (d.error || "Order failed.");
+      const d = await (await fetch(`/shop/${SHOP}/payment-status/${orderId}`)).json();
+      if (d.status === "paid") {
+        clearInterval(poll);
+        showPayResult(true, "Payment received",
+          `Order #${jobId} · ₹${price.toFixed(2)} — your document is printing now. `
+          + `Collect it at the counter.`);
+      } else if (d.status === "failed") {
+        clearInterval(poll);
+        showPayResult(false, "Payment not completed",
+          "Nothing was charged and nothing was printed. You can start again.");
       }
-    } catch (e) {
-      out.textContent = "❌ Network error.";
-    } finally {
-      btn.disabled = false; btn.textContent = "Place order";
-      updatePrice();
+    } catch (e) { /* transient — keep polling */ }
+    if (ticks > 100) {
+      clearInterval(poll);
+      showPayResult(false, "Still waiting",
+        "We haven't seen the payment yet. If you were charged, show this "
+        + `order (#${jobId}) at the counter.`);
     }
-  });
+  }, 3000);
+}
+
+$("order-btn").addEventListener("click", async () => {
+  const btn = $("order-btn"), label = btn.textContent;
+  btn.disabled = true; btn.textContent = "Preparing…";
+  try {
+    const r = await fetch(`/shop/${SHOP}/order`, { method: "POST", body: buildForm() });
+    const d = await r.json();
+    if (!r.ok || !d.ok) {
+      alert(d.error || "Could not place the order. Please try again.");
+      return;
+    }
+    payModal.classList.add("open");
+    pollPayment(d.order_id, d.job_id, d.price);
+    new Cashfree({ mode: d.cf_env }).checkout({
+      paymentSessionId: d.payment_session_id, redirectTarget: "_modal",
+    });
+  } catch (e) {
+    alert("Network error. Please check your connection and try again.");
+  } finally { btn.disabled = false; btn.textContent = label; updatePrice(); }
+});
 </script>
-</body>
-</html>
+{% endblock %}

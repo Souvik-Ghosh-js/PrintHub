@@ -102,11 +102,11 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     vendor_id INTEGER NOT NULL, customer_id TEXT, customer_name TEXT,
     doc_format TEXT, file_url TEXT, storage_key TEXT, original_filename TEXT,
-    status TEXT NOT NULL DEFAULT 'uploaded',
+    status TEXT NOT NULL DEFAULT 'awaiting_payment',
     total_pages INTEGER DEFAULT 1, sides TEXT DEFAULT 'single',
     orientation TEXT DEFAULT 'portrait', color_mode TEXT DEFAULT 'bw',
     paper_size TEXT DEFAULT 'A4', price REAL DEFAULT 0,
-    payment_status TEXT NOT NULL DEFAULT 'counter', copies INTEGER DEFAULT 1,
+    payment_status TEXT NOT NULL DEFAULT 'pending', copies INTEGER DEFAULT 1,
     order_id TEXT, transaction_id TEXT, paid_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );

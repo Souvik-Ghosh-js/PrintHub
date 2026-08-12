@@ -1,175 +1,181 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Super Admin — PrintHub</title>
-  <style>
-    body { font-family: 'Segoe UI', system-ui, sans-serif; margin: 0;
-           background: #f2f4f8; color: #1c2333; }
-    header { background: #10163a; color: #fff; padding: 14px 20px;
-             display: flex; justify-content: space-between; align-items: center; }
-    header h1 { margin: 0; font-size: 1.15rem; }
-    header a { color: #cfd6f5; font-size: .9rem; }
-    main { max-width: 1080px; margin: 20px auto; padding: 0 12px 60px; }
-    .card { background: #fff; border-radius: 10px; padding: 18px;
-            margin-bottom: 16px; box-shadow: 0 1px 4px rgba(20,30,80,.08);
-            overflow-x: auto; }   /* wide tables scroll on phones */
-    @media (max-width: 520px) {
-      main { margin: 12px auto; padding: 0 8px 40px; }
-      .card { padding: 14px; }
-      input, select { font-size: 16px; }   /* no iOS zoom-on-focus */
-      .newv { flex-direction: column; align-items: stretch; }
-    }
-    h2 { font-size: 1rem; color: #1c2a6e; margin: 0 0 12px; }
-    table { width: 100%; border-collapse: collapse; font-size: .85rem; }
-    th, td { padding: 6px 8px; border-bottom: 1px solid #e4e8f4; text-align: left;
-             vertical-align: top; }
-    th { background: #eef1f8; color: #1c2a6e; }
-    .badge { padding: 2px 10px; border-radius: 12px; font-size: .78rem; color: #fff;
-             white-space: nowrap; }
-    .active { background: #1c8a3c; } .grace { background: #c78a00; }
-    .suspended, .rejected { background: #b32020; } .pending_payment { background: #667; }
-    input, select { padding: 7px; border: 1px solid #ccd3ea; border-radius: 6px; }
-    button { padding: 7px 12px; background: #1c2a6e; color: #fff; border: none;
-             border-radius: 6px; cursor: pointer; font-size: .83rem; }
-    button.ok { background: #1c8a3c; } button.warn { background: #b32020; }
-    .flash { color: #1c8a3c; font-size: .9rem; }
-    .creds { background: #fff8e0; border: 1.5px solid #e0c860; border-radius: 10px;
-             padding: 16px; margin-bottom: 16px; }
-    .creds code { font-size: 1.05rem; background: #fff; padding: 2px 8px;
-                  border-radius: 4px; }
-    .muted { color: #6a76a8; }
-    form.inline { display: inline; }
-    .newv { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  </style>
-</head>
-<body>
-<header>
-  <h1>PrintHub — Super Admin</h1>
-  <a href="{{ url_for('admin_logout') }}">Log out</a>
-</header>
-<main>
-  {% with messages = get_flashed_messages() %}
-    {% for m in messages %}<p class="flash">{{ m }}</p>{% endfor %}
-  {% endwith %}
+{% extends "base.html" %}
+{% block title %}Admin — PrintHub{% endblock %}
+{% block brandsub %}Admin{% endblock %}
+{% block nav %}<a href="{{ url_for('admin_logout') }}">Sign out</a>{% endblock %}
 
-  {% if new_credentials %}
-  <div class="creds">
-    <strong>⚠ Credentials for {{ new_credentials.shop_name }} — shown ONCE.
-      Deliver them to the vendor now (spec §6.4).</strong><br><br>
-    Login ID: <code>{{ new_credentials.login_id }}</code> &nbsp;
-    Password: <code>{{ new_credentials.password }}</code><br>
-    <span class="muted">First payment recorded:
-      ₹{{ new_credentials.subscription_fee }} ({{ new_credentials.plan }}) +
-      ₹{{ new_credentials.installation_fee }} installation =
-      ₹{{ new_credentials.total }}</span>
-    {% if new_credentials.vendor_id %}
-    <br><br>Also hand over the shop's counter QR:
+{% block head %}
+<style>
+  .vendor-cell strong { display: block; }
+  .actions-cell { display: flex; gap: .35rem; flex-wrap: wrap; }
+  .actions-cell form { display: inline; }
+  .paylink { font-size: .72rem; word-break: break-all; }
+  .tabs { display: flex; gap: .4rem; margin-bottom: 1rem; flex-wrap: wrap; }
+  .tab { padding: .45rem .9rem; border-radius: 999px; border: 1px solid var(--line);
+         background: var(--surface); font-size: .85rem; font-weight: 600;
+         color: var(--ink-2); cursor: pointer; }
+  .tab.on { background: var(--brand-600); color: #fff; border-color: var(--brand-600); }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Platform overview</h1>
+
+<div class="stats" style="margin:1rem 0;">
+  <div class="stat"><div class="stat-label">Vendors</div>
+    <div class="stat-value">{{ vendors|length }}</div></div>
+  <div class="stat"><div class="stat-label">Live shops</div>
+    <div class="stat-value">{{ stats.live }}</div></div>
+  <div class="stat"><div class="stat-label">Awaiting payment</div>
+    <div class="stat-value">{{ stats.pending }}</div></div>
+  <div class="stat"><div class="stat-label">Subscription revenue</div>
+    <div class="stat-value">₹{{ '%.0f'|format(stats.revenue) }}</div></div>
+</div>
+
+{% if new_credentials %}
+<div class="creds" style="margin-bottom:1rem;">
+  <strong>⚠ Credentials for {{ new_credentials.shop_name }} — shown once.
+    Deliver them to the vendor now.</strong>
+  <div class="kv">
+    <span>Login ID <code>{{ new_credentials.login_id }}</code></span>
+    <span>Password <code>{{ new_credentials.password }}</code></span>
+  </div>
+  {% if new_credentials.vendor_id %}
+  <p class="muted tiny" style="margin:.7rem 0 0;">Also hand over their
     <a href="{{ url_for('shop_qr_poster', vendor_id=new_credentials.vendor_id) }}"
-       target="_blank">open the printable QR poster</a> — customers scan it to
-    upload &amp; pay, no login needed.
-    {% endif %}
-  </div>
+       target="_blank">counter QR poster</a>.</p>
   {% endif %}
+</div>
+{% endif %}
 
-  <div class="card">
-    <h2>Register a vendor</h2>
-    <form method="post" action="{{ url_for('admin_create_vendor') }}" class="newv">
-      <input name="name" placeholder="Owner name" required>
-      <input name="shop_name" placeholder="Shop name" required>
-      <input name="phone" placeholder="Phone">
-      <input name="shop_code" placeholder="Shop URL code (optional)">
-      <select name="plan">
-        {% for key, p in plans.items() %}
-        <option value="{{ key }}">{{ p.label }} — ₹{{ p.fee }} + ₹{{ installation_fee }} install</option>
-        {% endfor %}
-      </select>
-      <button type="submit">Register (pending payment)</button>
-    </form>
-  </div>
+<!-- ---------- register ---------- -->
+<div class="card">
+  <div class="card-head"><h2>Register a vendor</h2>
+    <span class="muted tiny">Activated only by a real Cashfree payment</span></div>
+  <form method="post" action="{{ url_for('admin_create_vendor') }}">
+    <div class="field-row">
+      <div class="field"><label for="v_name">Owner name</label>
+        <input type="text" id="v_name" name="name" required></div>
+      <div class="field"><label for="v_shop">Shop name</label>
+        <input type="text" id="v_shop" name="shop_name" required></div>
+    </div>
+    <div class="field-row" style="margin-top:.85rem;">
+      <div class="field"><label for="v_phone">Phone</label>
+        <input type="tel" id="v_phone" name="phone"></div>
+      <div class="field"><label for="v_email">Email</label>
+        <input type="email" id="v_email" name="email"></div>
+      <div class="field"><label for="v_code">Shop code <span class="muted">(their URL)</span></label>
+        <input type="text" id="v_code" name="shop_code" placeholder="e.g. mohini"></div>
+      <div class="field"><label for="v_plan">Plan</label>
+        <select id="v_plan" name="plan">
+          {% for key, p in plans.items() %}
+          <option value="{{ key }}">{{ p.label }} — ₹{{ p.fee }} + ₹{{ installation_fee }} setup</option>
+          {% endfor %}
+        </select></div>
+    </div>
+    <button type="submit" class="btn btn-primary" style="margin-top:1rem;">Register vendor</button>
+  </form>
+</div>
 
-  <div class="card">
-    <h2>Vendors &amp; subscription enforcement</h2>
+<!-- ---------- vendors ---------- -->
+<div class="card">
+  <div class="card-head"><h2>Vendors</h2></div>
+  <div class="table-scroll">
     <table>
-      <tr><th>Shop</th><th>Login ID</th><th>Plan</th><th>Status</th>
-          <th>Renews</th><th>Grace until</th><th>Actions</th></tr>
+      <thead><tr><th>Shop</th><th>Login</th><th>Plan</th><th>Status</th>
+                 <th>Setup</th><th>Renews</th><th>Actions</th></tr></thead>
+      <tbody>
       {% for v in vendors %}
-      <tr>
-        <td><strong>{{ v.shop_name }}</strong><br>
-            <span class="muted">{{ v.name }} · /{{ v.shop_code }} ·
-              <a href="{{ url_for('shop_qr_poster', vendor_id=v.id) }}"
-                 target="_blank">QR poster</a></span></td>
-        <td>{{ v.login_id or '—' }}</td>
-        <td>{{ v.plan }}</td>
-        <td><span class="badge {{ v.status }}">{{ v.status.replace('_',' ') }}</span></td>
-        <td class="muted">{{ v.renews_at or '—' }}</td>
-        <td class="muted">{{ v.grace_until or '—' }}</td>
-        <td>
-          {% if v.status == 'pending_payment' %}
-          <form class="inline" method="post"
-                action="{{ url_for('admin_first_payment', vendor_id=v.id) }}">
-            <button class="ok" type="submit">Record first payment + activate</button>
-          </form>
-          <br><span class="muted">or send the pay link:
-            <code>/pay/onboard/{{ v.shop_code }}</code></span>
-          {% else %}
-            {% if v.plan != 'lifetime' %}
-            <form class="inline" method="post"
-                  action="{{ url_for('admin_renewal_payment', vendor_id=v.id) }}">
-              <button type="submit">Record renewal</button>
-            </form>
+        <tr>
+          <td class="vendor-cell">
+            <strong>{{ v.shop_name }}</strong>
+            <span class="muted tiny">{{ v.name }} · /{{ v.shop_code }}</span>
+          </td>
+          <td>{{ v.login_id or '—' }}</td>
+          <td>{{ v.plan }}</td>
+          <td><span class="pill {{ 'pill-ok' if v.status == 'active'
+                                  else 'pill-warn' if v.status == 'grace'
+                                  else 'pill-bad' if v.status in ('suspended','rejected')
+                                  else 'pill-neutral' }}">{{ v.status.replace('_',' ') }}</span></td>
+          <td class="tiny">
+            {% if v.status == 'pending_payment' %}<span class="muted">awaiting payment</span>
+            {% else %}
+              {{ '💳' if v.cashfree_app_id else '⬜' }} payments<br>
+              {{ '💰' if v.price_bw and v.price_bw|float > 0 else '⬜' }} prices
             {% endif %}
-            {% if v.status in ('suspended', 'grace') %}
-            <form class="inline" method="post"
-                  action="{{ url_for('admin_decide', vendor_id=v.id) }}">
-              <input type="hidden" name="decision" value="approve">
-              <button class="ok" type="submit">Approve</button>
-            </form>
-            <form class="inline" method="post"
-                  action="{{ url_for('admin_decide', vendor_id=v.id) }}">
-              <input type="hidden" name="decision" value="reject">
-              <button class="warn" type="submit">Reject</button>
-            </form>
+          </td>
+          <td class="muted tiny">{{ v.renews_at or ('lifetime' if v.plan == 'lifetime' else '—') }}</td>
+          <td>
+            <div class="actions-cell">
+              {% if v.status == 'pending_payment' %}
+                <a class="btn btn-ghost btn-sm" target="_blank"
+                   href="{{ url_for('pay_onboard', code=v.shop_code) }}">Open pay link</a>
+              {% else %}
+                <a class="btn btn-ghost btn-sm" target="_blank"
+                   href="{{ url_for('shop_qr_poster', vendor_id=v.id) }}">QR</a>
+                {% if v.status in ('suspended', 'grace', 'rejected') %}
+                  <form method="post" action="{{ url_for('admin_decide', vendor_id=v.id) }}">
+                    <input type="hidden" name="decision" value="approve">
+                    <button class="btn btn-success btn-sm" type="submit">Approve</button></form>
+                  <form method="post" action="{{ url_for('admin_decide', vendor_id=v.id) }}">
+                    <input type="hidden" name="decision" value="reject">
+                    <button class="btn btn-danger btn-sm" type="submit">Reject</button></form>
+                {% endif %}
+              {% endif %}
+            </div>
+            {% if v.status == 'pending_payment' %}
+            <div class="muted paylink">{{ base_url }}/pay/onboard/{{ v.shop_code }}</div>
             {% endif %}
-          {% endif %}
-        </td>
-      </tr>
+          </td>
+        </tr>
       {% else %}
-      <tr><td colspan="7" class="muted">No vendors yet.</td></tr>
+        <tr><td colspan="7" class="empty">No vendors yet — register one above.</td></tr>
       {% endfor %}
+      </tbody>
     </table>
+  </div>
+  <p class="muted tiny" style="margin:.8rem 0 0;">Expired vendors get a 15-day
+    grace period, then await your approve/reject decision. Rejected vendors lose
+    all access until they pay.</p>
+</div>
+
+<div class="grid2">
+  <div class="card">
+    <div class="card-head"><h2>Payments</h2></div>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Date</th><th>Vendor</th><th>Type</th><th>Amount</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for p in payments %}
+          <tr><td class="muted tiny">{{ p.created_at }}</td>
+              <td>{{ p.shop_name or p.vendor_id }}</td>
+              <td>{{ p.kind }}{% if p.plan %} <span class="muted tiny">{{ p.plan }}</span>{% endif %}</td>
+              <td>₹{{ '%.2f'|format(p.amount) }}</td>
+              <td><span class="pill {{ 'pill-ok' if p.status == 'paid' else 'pill-neutral' }}">{{ p.status }}</span></td></tr>
+        {% else %}
+          <tr><td colspan="5" class="empty">No payments yet.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
 
   <div class="card">
-    <h2>Payment log</h2>
-    <table>
-      <tr><th>Date</th><th>Vendor</th><th>Type</th><th>Plan</th>
-          <th>Amount</th><th>Status</th><th>Method</th></tr>
-      {% for p in payments %}
-      <tr><td class="muted">{{ p.created_at }}</td><td>{{ p.shop_name or p.vendor_id }}</td>
-          <td>{{ p.kind }}</td><td>{{ p.plan or '—' }}</td>
-          <td>₹{{ '%.2f' % p.amount }}</td><td>{{ p.status }}</td>
-          <td>{{ p.method }}</td></tr>
-      {% else %}
-      <tr><td colspan="7" class="muted">No payments recorded.</td></tr>
-      {% endfor %}
-    </table>
+    <div class="card-head"><h2>Activity</h2></div>
+    <div class="table-scroll" style="max-height:420px; overflow-y:auto;">
+      <table>
+        <thead><tr><th>When</th><th>Vendor</th><th>Action</th></tr></thead>
+        <tbody>
+        {% for a in activity %}
+          <tr><td class="muted tiny">{{ a.created_at }}</td>
+              <td class="tiny">{{ a.shop_name or '—' }}</td>
+              <td class="tiny"><strong>{{ a.action }}</strong>
+                {% if a.detail %}<br><span class="muted">{{ a.detail }}</span>{% endif %}</td></tr>
+        {% else %}
+          <tr><td colspan="3" class="empty">No activity yet.</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
-
-  <div class="card">
-    <h2>Activity log</h2>
-    <table>
-      <tr><th>Date</th><th>Vendor</th><th>Actor</th><th>Action</th><th>Detail</th></tr>
-      {% for a in activity %}
-      <tr><td class="muted">{{ a.created_at }}</td><td>{{ a.shop_name or '—' }}</td>
-          <td>{{ a.actor }}</td><td>{{ a.action }}</td>
-          <td class="muted">{{ a.detail }}</td></tr>
-      {% else %}
-      <tr><td colspan="5" class="muted">No activity yet.</td></tr>
-      {% endfor %}
-    </table>
-  </div>
-</main>
-</body>
-</html>
+</div>
+{% endblock %}

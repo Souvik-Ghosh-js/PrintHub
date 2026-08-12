@@ -3,64 +3,101 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>QR poster — {{ vendor.shop_name }}</title>
+  <title>Counter poster — {{ vendor.shop_name }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
   <style>
-    body { font-family: 'Segoe UI', system-ui, sans-serif; margin: 0;
-           background: #f2f4f8; color: #1c2333; }
-    .toolbar { padding: 12px 20px; background: #10163a; color: #fff;
-               display: flex; justify-content: space-between; align-items: center; }
-    .toolbar button { padding: 9px 18px; background: #1c8a3c; color: #fff;
-                      border: none; border-radius: 6px; cursor: pointer;
-                      font-size: .95rem; }
-    .toolbar a { color: #cfd6f5; font-size: .9rem; }
+    body { background: var(--bg); }
+    .bar { position: sticky; top: 0; z-index: 10; background: var(--surface);
+           border-bottom: 1px solid var(--line); padding: .7rem 1rem;
+           display: flex; justify-content: space-between; align-items: center;
+           gap: 1rem; flex-wrap: wrap; }
 
-    /* The poster itself — sized to print nicely on one A4 portrait page */
-    .poster { background: #fff; width: min(680px, 94vw); margin: 24px auto;
-              padding: 48px 40px; border-radius: 12px; text-align: center;
-              box-shadow: 0 2px 10px rgba(20,30,80,.12); }
-    .poster h1 { color: #1c2a6e; font-size: 2rem; margin: 0 0 4px; }
-    .poster .tag { color: #6a76a8; font-size: 1.05rem; margin-bottom: 28px; }
-    .poster img.qr { width: min(380px, 80%); image-rendering: pixelated;
-                     border: 10px solid #1c2a6e; border-radius: 14px; }
-    .poster .scan { font-size: 1.5rem; font-weight: 700; color: #1c2a6e;
-                    margin: 26px 0 6px; }
-    .poster .steps { color: #3a4470; font-size: 1.02rem; line-height: 1.7;
-                     margin: 0 auto; max-width: 420px; text-align: left; }
-    .poster .url { margin-top: 24px; color: #6a76a8; font-size: .85rem;
-                   word-break: break-all; }
-    .poster .brand { margin-top: 18px; color: #9aa3c8; font-size: .8rem; }
+    /* A4-proportioned poster */
+    .poster {
+      width: min(700px, 94vw); margin: 1.5rem auto; background: #fff; color: #0f172a;
+      border-radius: 18px; box-shadow: var(--shadow); overflow: hidden;
+      text-align: center;
+    }
+    .poster-top {
+      background: linear-gradient(135deg, #4f46e5, #4338ca); color: #fff;
+      padding: 2rem 1.5rem 1.6rem;
+    }
+    .poster-top h1 { font-size: 2.1rem; margin: 0 0 .3rem; color: #fff; }
+    .poster-top .sub { opacity: .92; font-size: 1.05rem; }
+    .poster-body { padding: 2rem 1.5rem 2.2rem; }
+    .qr-frame {
+      display: inline-block; padding: 14px; background: #fff; border-radius: 18px;
+      border: 3px solid #0f172a;
+    }
+    .qr-frame img { display: block; width: min(320px, 62vw); image-rendering: pixelated; }
+    .scan-cta { font-size: 1.9rem; font-weight: 800; letter-spacing: -.02em;
+                margin: 1.3rem 0 .3rem; color: #0f172a; }
+    .scan-sub { color: #475569; font-size: 1.05rem; margin-bottom: 1.6rem; }
+    .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: .7rem;
+             text-align: center; margin: 0 auto; max-width: 540px; }
+    .stp-ico { font-size: 1.5rem; }
+    .stp-txt { font-size: .82rem; color: #334155; line-height: 1.35; margin-top: .2rem; }
+    .rates-row { display: flex; justify-content: center; gap: 1.5rem;
+                 margin: 1.6rem 0 .4rem; font-size: 1.05rem; font-weight: 700;
+                 color: #0f172a; }
+    .rates-row span small { display: block; font-size: .72rem; font-weight: 600;
+                            color: #64748b; text-transform: uppercase;
+                            letter-spacing: .05em; }
+    .poster-foot { border-top: 1px dashed #cbd5e1; margin-top: 1.5rem;
+                   padding-top: 1rem; color: #64748b; font-size: .8rem; }
+    .poster-foot .url { font-weight: 700; color: #4338ca; font-size: .95rem;
+                        word-break: break-all; }
 
     @media print {
-      .toolbar { display: none; }
+      .bar { display: none; }
       body { background: #fff; }
-      .poster { box-shadow: none; margin: 0 auto; border-radius: 0;
-                width: auto; }
+      .poster { width: 100%; margin: 0; box-shadow: none; border-radius: 0; }
+      .poster-top { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     }
+    @media (max-width: 520px) { .steps { grid-template-columns: repeat(2, 1fr); } }
   </style>
 </head>
 <body>
-<div class="toolbar">
-  <span>QR poster for {{ vendor.shop_name }} ({{ vendor.shop_code }})</span>
-  <span>
-    <a href="/qr/{{ vendor.id }}.png" download="printhub-qr-{{ vendor.shop_code }}.png">Download PNG</a>
-    &nbsp;
-    <button onclick="window.print()">🖨 Print poster</button>
+<div class="bar">
+  <span class="muted">Counter poster · {{ vendor.shop_name }}</span>
+  <span class="btn-row">
+    <a class="btn btn-ghost btn-sm" href="/qr/{{ vendor.id }}.png"
+       download="printhub-qr-{{ vendor.shop_code }}.png">Download PNG</a>
+    <button class="btn btn-primary btn-sm" onclick="window.print()">🖨 Print poster</button>
   </span>
 </div>
 
 <div class="poster">
-  <h1>{{ vendor.shop_name }}</h1>
-  <div class="tag">Document printing — no login needed</div>
-  <img class="qr" src="/qr/{{ vendor.id }}.png" alt="Scan to print">
-  <div class="scan">📱 Scan to print</div>
-  <div class="steps">
-    1. Scan the QR with your phone camera<br>
-    2. Photograph your document — Aadhaar, PAN, Voter ID or any pages<br>
-    3. It's auto-cropped &amp; enhanced; choose B/W or colour and copies<br>
-    4. Pay on your phone {{ '(UPI / card)' if vendor.cashfree_app_id else 'at the counter' }} — printing starts automatically
+  <div class="poster-top">
+    <h1>{{ vendor.shop_name }}</h1>
+    <div class="sub">Print from your phone — no app, no queue</div>
   </div>
-  <div class="url">{{ shop_url }}</div>
-  <div class="brand">Powered by PrintHub</div>
+
+  <div class="poster-body">
+    <div class="qr-frame">
+      <img src="/qr/{{ vendor.id }}.png" alt="Scan to print">
+    </div>
+
+    <div class="scan-cta">📱 Scan to print</div>
+    <div class="scan-sub">Point your camera at the code</div>
+
+    <div class="steps">
+      <div><div class="stp-ico">1️⃣</div><div class="stp-txt">Scan the code</div></div>
+      <div><div class="stp-ico">📷</div><div class="stp-txt">Photograph your document</div></div>
+      <div><div class="stp-ico">✨</div><div class="stp-txt">Auto-cropped &amp; cleaned</div></div>
+      <div><div class="stp-ico">💳</div><div class="stp-txt">Pay by UPI — it prints</div></div>
+    </div>
+
+    <div class="rates-row">
+      <span><small>Black &amp; White</small>₹{{ '%.0f'|format(vendor.price_bw) }}/page</span>
+      <span><small>Colour</small>₹{{ '%.0f'|format(vendor.price_colour) }}/page</span>
+    </div>
+
+    <div class="poster-foot">
+      <div class="url">{{ shop_url }}</div>
+      <div style="margin-top:.4rem;">Aadhaar · PAN · Voter ID · any document — Powered by PrintHub</div>
+    </div>
+  </div>
 </div>
 </body>
 </html>
