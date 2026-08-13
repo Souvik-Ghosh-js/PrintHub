@@ -879,6 +879,26 @@ def worker_mark_printed(job_id):
     return jsonify({"status": "ok"})
 
 
+@app.route("/worker/api/jobs/<int:job_id>/release", methods=["POST"])
+def worker_release_job(job_id):
+    """The worker could NOT print this job (printer offline, out of paper,
+    submit error). Put it straight back in the queue so it is retried — a
+    paid job must never be silently dropped."""
+    vendor = worker_vendor()
+    if not vendor:
+        return jsonify({"error": "forbidden"}), 403
+    job = db.get_job(job_id)
+    if not job or job["vendor_id"] != vendor["id"]:
+        return jsonify({"error": "not found"}), 404
+    if job["status"] == "printing":
+        db.update_job(job_id, {"status": "confirmed", "claimed_at": None})
+        reason = (request.get_json(silent=True) or {}).get("reason", "")
+        db.log_activity("worker", "job_requeued",
+                        f"job {job_id}: {reason or 'not printed'}",
+                        vendor_id=vendor["id"])
+    return jsonify({"status": "ok"})
+
+
 @app.route("/worker/api/printer-config", methods=["POST"])
 def worker_printer_config():
     """The worker syncs the vendor's printer setup (spec §7): single/multi

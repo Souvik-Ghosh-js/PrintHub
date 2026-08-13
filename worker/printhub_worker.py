@@ -35,9 +35,13 @@ import win32con
 DEFAULT_SERVER = "https://mohiniprintshop.com/"
 POLL_SECONDS = 10
 PRINT_CONFIRM_TIMEOUT = 120
-# After a genuine printer failure (offline / out of paper), wait this long
-# before retrying that job, so a persistent fault can't spin the queue.
+# After a genuine printer failure mid-print, wait this long before retrying
+# that job, so a persistent fault can't spin the queue.
 RETRY_COOLDOWN = 120
+# When we haven't printed anything yet and are just waiting for the printer
+# to come back (offline / out of paper / not selected), re-check often so the
+# job goes out seconds after the printer is switched on.
+WAIT_COOLDOWN = 15
 
 AUTO_TRAY_LABEL = "Auto (printer default)"
 
@@ -306,6 +310,14 @@ def api_mark_printed(job_id):
     r.raise_for_status()
 
 
+def api_release_job(job_id, reason=""):
+    """Hand a job back to the server because it could NOT be printed."""
+    r = requests.post(f"{SESSION.base_url}/worker/api/jobs/{job_id}/release",
+                      params={"token": SESSION.token},
+                      json={"reason": reason[:200]}, timeout=30)
+    r.raise_for_status()
+
+
 def api_save_printer_config():
     with SESSION.lock:
         payload = {
@@ -336,12 +348,23 @@ class WorkerThread(threading.Thread):
         self.unsynced = set()
         # job_id -> time of a genuine printer failure (for the retry cooldown).
         self.failed_at = {}
+        # job_id -> how long to wait before retrying that particular job.
+        self.cooldown_for = {}
 
     def log(self, msg):
         self.ui_queue.put(("log", msg))
 
     def record(self, job, status):
         self.ui_queue.put(("record", (job, status)))
+
+    def _release(self, job_id, reason):
+        """Tell the server we did not print this job, so it stays queued."""
+        try:
+            api_release_job(job_id, reason)
+        except Exception as e:
+            # Not fatal: the server also frees claims that go stale.
+            self.log(f"⚠️ Could not requeue job {job_id} on the server ({e}); "
+                     f"it will return automatically in a few minutes.")
 
     def _resync_printed(self):
         """Re-tell the server about jobs that printed but whose confirmation
@@ -378,9 +401,12 @@ class WorkerThread(threading.Thread):
                 # Already sent to a printer in this session — never again.
                 if job_id in self.submitted or job_id in self.unsynced:
                     continue
-                # A previously FAILED job waits out its cooldown first.
+                # A job that FAILED at the printer waits out its cooldown.
+                # (Jobs merely waiting for the printer to come back online
+                # use a much shorter wait — see WAIT_COOLDOWN.)
                 failed = self.failed_at.get(job_id)
-                if failed and time.time() - failed < RETRY_COOLDOWN:
+                cooldown = self.cooldown_for.get(job_id, RETRY_COOLDOWN)
+                if failed and time.time() - failed < cooldown:
                     continue
                 self._handle_job(job)
             self._sleep()
@@ -390,8 +416,30 @@ class WorkerThread(threading.Thread):
         job_id = job["id"]
         filename = job.get("original_filename", "?")
         printer, tray = SESSION.printer_for_job(job)
+
+        # Check the printer BEFORE downloading/printing: if it's off or has
+        # no paper, hand the job straight back so it stays visibly queued
+        # (and is picked up the moment the printer is switched on).
+        if not printer:
+            self.failed_at[job_id] = time.time()
+            self.cooldown_for[job_id] = WAIT_COOLDOWN
+            self._release(job_id, "no printer configured for this job type")
+            self.log(f"⚠️ Job {job_id}: no printer configured for "
+                     f"{job.get('color_mode')} — still queued.")
+            self.record(job, "waiting: no printer set")
+            return
+        ready, reason = printer_is_ready(printer)
+        if not ready:
+            self.failed_at[job_id] = time.time()
+            self.cooldown_for[job_id] = WAIT_COOLDOWN
+            self._release(job_id, f"printer not ready: {reason}")
+            self.log(f"⏸ Job {job_id}: {printer} is {reason} — still queued, "
+                     f"will print when the printer is ready.")
+            self.record(job, f"waiting: printer {reason}")
+            return
+
         self.log(f"📥 Job {job_id}: {filename} "
-                 f"({job.get('color_mode')}) → {printer or 'NO PRINTER'}")
+                 f"({job.get('color_mode')}) → {printer}")
         self.record(job, "printing")
         self.submitted.add(job_id)
 
@@ -409,12 +457,14 @@ class WorkerThread(threading.Thread):
                 self.record(job, "skipped (missing file)")
             else:
                 self.submitted.discard(job_id)
-                self.log(f"❌ Job {job_id}: download failed ({code}).")
+                self._release(job_id, f"download failed ({code})")
+                self.log(f"❌ Job {job_id}: download failed ({code}). Still queued.")
                 self.record(job, "failed")
             return
         except Exception as e:
             self.submitted.discard(job_id)
-            self.log(f"❌ Job {job_id}: download error: {e}")
+            self._release(job_id, f"download error: {e}")
+            self.log(f"❌ Job {job_id}: download error: {e}. Still queued.")
             self.record(job, "failed")
             return
 
@@ -426,7 +476,8 @@ class WorkerThread(threading.Thread):
             status, message = print_file(tmp_path, job, printer, tray)
         except Exception as e:
             self.submitted.discard(job_id)
-            self.log(f"❌ Job {job_id}: print error: {e}")
+            self._release(job_id, f"print error: {e}")
+            self.log(f"❌ Job {job_id}: print error: {e}. Still queued.")
             self.record(job, "failed")
             return
         finally:
@@ -449,12 +500,15 @@ class WorkerThread(threading.Thread):
                          f"updated ({e}) — will keep retrying, not reprinting.")
                 self.record(job, "printed (syncing…)")
         else:
-            # A genuine printer failure (offline, out of paper, ...). Allow a
-            # retry, but only after a cooldown so we can't hammer the printer.
+            # A genuine printer failure (offline, out of paper, ...). Nothing
+            # came out, so hand the job BACK to the server: it must stay in
+            # the queue and be retried — by this worker after a cooldown, or
+            # by another/restarted worker immediately.
             self.failed_at[job_id] = time.time()
             self.submitted.discard(job_id)
+            self._release(job_id, message)
             self.log(f"❌ Job {job_id} NOT printed: {message}. "
-                     f"Retrying in {RETRY_COOLDOWN}s.")
+                     f"Still queued — retrying in {RETRY_COOLDOWN}s.")
             self.record(job, f"failed: {message}")
 
     def _sleep(self, seconds=POLL_SECONDS):

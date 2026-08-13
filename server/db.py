@@ -321,7 +321,7 @@ def claim_job(job_id):
     return rowcount
 
 
-def release_stale_claims(max_age_seconds=600):
+def release_stale_claims(max_age_seconds=180):
     """Return jobs whose worker went away mid-print back to the queue, so a
     crash or power cut doesn't strand a paid job forever."""
     cutoff = datetime.now() - timedelta(seconds=max_age_seconds)
