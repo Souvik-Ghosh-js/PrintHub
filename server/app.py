@@ -579,7 +579,8 @@ def vendor_dashboard(vendor):
     has_prices = float(vendor.get("price_bw") or 0) > 0
     stats = {
         "printed": sum(1 for j in jobs if j["status"] == "printed"),
-        "queued": sum(1 for j in jobs if j["status"] == "confirmed"),
+        "queued": sum(1 for j in jobs
+                      if j["status"] in ("confirmed", "printing")),
         "revenue": sum(float(j["price"] or 0) for j in jobs
                        if j.get("payment_status") == "paid"),
     }
@@ -838,12 +839,23 @@ def worker_jobs():
     if not billing.has_access(vendor):
         # Suspended/rejected vendors lose access until payment clears (§8.3).
         return jsonify({"error": f"subscription {vendor['status']}"}), 403
+    # Give back any job whose worker vanished mid-print before serving.
+    db.release_stale_claims()
     jobs = db.get_vendor_jobs(vendor["id"], status="confirmed")
+    out = []
     for j in jobs:
+        # Hand a job to the worker ONCE. It is claimed here (status ->
+        # printing) so a later poll can never serve it again — the failure
+        # that reprinted a customer's document forever. If the worker dies
+        # mid-print, _release_stale_claims() below puts it back after a
+        # timeout, and the worker's own guard stops a same-session repeat.
+        if db.claim_job(j["id"]) == 0:
+            continue                      # another poll already took it
         j["created_at"] = str(j.get("created_at"))
         j["price"] = float(j.get("price") or 0)
+        out.append(j)
     # shop_name lets the worker resume a saved session without re-login.
-    return jsonify({"jobs": jobs,
+    return jsonify({"jobs": out,
                     "shop_name": vendor["shop_name"],
                     "printer_config": _printer_config(vendor)})
 
@@ -856,6 +868,8 @@ def worker_mark_printed(job_id):
     job = db.get_job(job_id)
     if not job or job["vendor_id"] != vendor["id"]:
         return jsonify({"error": "not found"}), 404
+    if job["status"] == "printed":
+        return jsonify({"status": "ok"})       # idempotent re-confirmation
     db.update_job(job_id, {"status": "printed"})
     if job.get("storage_key"):
         db.storage_remove(job["storage_key"])

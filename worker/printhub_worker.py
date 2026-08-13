@@ -32,9 +32,12 @@ import win32print
 import win32api
 import win32con
 
-DEFAULT_SERVER = "http://127.0.0.1:5000"
+DEFAULT_SERVER = "https://mohiniprintshop.com/"
 POLL_SECONDS = 10
 PRINT_CONFIRM_TIMEOUT = 120
+# After a genuine printer failure (offline / out of paper), wait this long
+# before retrying that job, so a persistent fault can't spin the queue.
+RETRY_COOLDOWN = 120
 
 AUTO_TRAY_LABEL = "Auto (printer default)"
 
@@ -235,7 +238,13 @@ def print_file(file_path, job, printer, tray_name):
             new_id = max(added)
             break
     if new_id is None:
-        return "failed", "job did not reach the print queue (no PDF handler?)"
+        # The page may well have printed: a small job can enter AND leave the
+        # spooler between two polls, so "never seen" is NOT proof of failure.
+        # Treat it as done-but-unverified rather than retrying, because a
+        # retry loop here reprints the document endlessly (and the customer
+        # already paid for one copy).
+        return "printed", ("submitted; spooler job completed too quickly to "
+                           "track (not re-sent to avoid duplicates)")
 
     deadline = time.time() + PRINT_CONFIRM_TIMEOUT
     error_bits = {
@@ -321,7 +330,12 @@ class WorkerThread(threading.Thread):
         super().__init__(daemon=True)
         self.ui_queue = ui_queue
         self.stop_event = stop_event
+        # Jobs already sent to a printer this session — never sent twice.
         self.submitted = set()
+        # Printed but the server didn't acknowledge; retried, never reprinted.
+        self.unsynced = set()
+        # job_id -> time of a genuine printer failure (for the retry cooldown).
+        self.failed_at = {}
 
     def log(self, msg):
         self.ui_queue.put(("log", msg))
@@ -329,10 +343,22 @@ class WorkerThread(threading.Thread):
     def record(self, job, status):
         self.ui_queue.put(("record", (job, status)))
 
+    def _resync_printed(self):
+        """Re-tell the server about jobs that printed but whose confirmation
+        didn't get through. Never reprints — only re-sends the ack."""
+        for job_id in list(self.unsynced):
+            try:
+                api_mark_printed(job_id)
+                self.unsynced.discard(job_id)
+                self.log(f"✅ Job {job_id} confirmed with the server.")
+            except Exception:
+                pass  # try again on the next cycle
+
     def run(self):
         self.log(f"Connected to {SESSION.base_url} as {SESSION.shop_name}")
         self.log("Watching for jobs...")
         while not self.stop_event.is_set():
+            self._resync_printed()
             try:
                 jobs = api_fetch_jobs()
             except PermissionError as e:
@@ -348,7 +374,13 @@ class WorkerThread(threading.Thread):
             for job in jobs:
                 if self.stop_event.is_set():
                     break
-                if job["id"] in self.submitted:
+                job_id = job["id"]
+                # Already sent to a printer in this session — never again.
+                if job_id in self.submitted or job_id in self.unsynced:
+                    continue
+                # A previously FAILED job waits out its cooldown first.
+                failed = self.failed_at.get(job_id)
+                if failed and time.time() - failed < RETRY_COOLDOWN:
                     continue
                 self._handle_job(job)
             self._sleep()
@@ -404,16 +436,25 @@ class WorkerThread(threading.Thread):
                 pass
 
         if status == "printed":
+            # Keep the job in `submitted` FOREVER (this session): paper has
+            # come out, so it must never be re-sent even if the server call
+            # below fails. Unsynced jobs are retried by _resync_printed().
             try:
                 api_mark_printed(job_id)
                 self.log(f"✅ Job {job_id} printed ({message}).")
                 self.record(job, "printed")
             except Exception as e:
-                self.log(f"⚠️ Job {job_id} printed but could not update server: {e}")
-                self.record(job, "printed (unsynced)")
+                self.unsynced.add(job_id)
+                self.log(f"⚠️ Job {job_id} printed but the server was not "
+                         f"updated ({e}) — will keep retrying, not reprinting.")
+                self.record(job, "printed (syncing…)")
         else:
+            # A genuine printer failure (offline, out of paper, ...). Allow a
+            # retry, but only after a cooldown so we can't hammer the printer.
+            self.failed_at[job_id] = time.time()
             self.submitted.discard(job_id)
-            self.log(f"❌ Job {job_id} NOT printed: {message}. Will retry later.")
+            self.log(f"❌ Job {job_id} NOT printed: {message}. "
+                     f"Retrying in {RETRY_COOLDOWN}s.")
             self.record(job, f"failed: {message}")
 
     def _sleep(self, seconds=POLL_SECONDS):

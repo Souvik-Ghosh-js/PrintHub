@@ -10,7 +10,7 @@ Production deployments should set PRINTHUB_DB=mysql explicitly.
 """
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pymysql
 from pymysql.cursors import DictCursor
@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     orientation TEXT DEFAULT 'portrait', color_mode TEXT DEFAULT 'bw',
     paper_size TEXT DEFAULT 'A4', price REAL DEFAULT 0,
     payment_status TEXT NOT NULL DEFAULT 'pending', copies INTEGER DEFAULT 1,
-    order_id TEXT, transaction_id TEXT, paid_at TEXT,
+    order_id TEXT, transaction_id TEXT, paid_at TEXT, claimed_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS gateway_orders (
@@ -133,6 +133,7 @@ _SQLITE_MIGRATIONS = [
     "ALTER TABLE print_jobs ADD COLUMN order_id TEXT",
     "ALTER TABLE print_jobs ADD COLUMN transaction_id TEXT",
     "ALTER TABLE print_jobs ADD COLUMN paid_at TEXT",
+    "ALTER TABLE print_jobs ADD COLUMN claimed_at TEXT",
     "ALTER TABLE gateway_orders ADD COLUMN meta TEXT",
 ]
 
@@ -304,6 +305,31 @@ def update_job(job_id, fields):
 def get_job(job_id):
     rows = query("SELECT * FROM print_jobs WHERE id = %s", (job_id,))
     return rows[0] if rows else None
+
+
+def claim_job(job_id):
+    """Atomically hand a confirmed job to a worker exactly once.
+
+    The UPDATE only matches while the row is still 'confirmed', so two
+    concurrent polls can never both take it. Returns 1 if claimed, 0 if
+    somebody already has it.
+    """
+    rowcount, _ = execute(
+        "UPDATE print_jobs SET status = 'printing', claimed_at = %s "
+        "WHERE id = %s AND status = 'confirmed'",
+        (datetime.now(), job_id))
+    return rowcount
+
+
+def release_stale_claims(max_age_seconds=600):
+    """Return jobs whose worker went away mid-print back to the queue, so a
+    crash or power cut doesn't strand a paid job forever."""
+    cutoff = datetime.now() - timedelta(seconds=max_age_seconds)
+    rowcount, _ = execute(
+        "UPDATE print_jobs SET status = 'confirmed' "
+        "WHERE status = 'printing' AND claimed_at IS NOT NULL "
+        "AND claimed_at < %s", (cutoff,))
+    return rowcount
 
 
 def get_jobs_by_order(order_id):

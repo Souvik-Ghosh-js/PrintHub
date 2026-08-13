@@ -108,7 +108,7 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     storage_key        VARCHAR(512),
     original_filename  VARCHAR(512),
     status             VARCHAR(32)  NOT NULL DEFAULT 'awaiting_payment',
-        -- awaiting_payment|confirmed|printed|cancelled
+        -- awaiting_payment|confirmed|printing|printed|cancelled
     total_pages        INT          DEFAULT 1,
     sides              VARCHAR(16)  DEFAULT 'single',
     orientation        VARCHAR(16)  DEFAULT 'portrait',
@@ -120,6 +120,7 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     order_id           VARCHAR(128),         -- Cashfree order (online payments)
     transaction_id     VARCHAR(128),
     paid_at            DATETIME,
+    claimed_at         DATETIME,             -- when a worker took the job
     created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     KEY idx_vendor_status (vendor_id, status),
