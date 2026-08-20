@@ -227,20 +227,34 @@ def print_file(file_path, job, printer, tray_name):
     except Exception as e:
         return "failed", f"could not apply settings: {e}"
 
-    before, _ = _get_job_ids(printer)
+    try:
+        before, _ = _get_job_ids(printer)
+    except Exception as e:
+        return "failed", f"could not read the print queue: {e}"
+
+    # ---- POINT OF NO RETURN -------------------------------------------
+    # Past this line the document has been handed to Windows and paper may
+    # already be coming out. Any error from here on must NOT be reported as
+    # "not printed", or the job gets requeued and prints again forever.
     try:
         _submit_print(file_path, printer)
     except Exception as e:
         return "failed", f"submit error: {e}"
 
     new_id = None
-    for _ in range(60):  # up to ~30s for the spooler to register the job
-        time.sleep(0.5)
-        after, _ = _get_job_ids(printer)
-        added = after - before
-        if added:
-            new_id = max(added)
-            break
+    try:
+        for _ in range(60):  # up to ~30s for the spooler to register the job
+            time.sleep(0.5)
+            after, _ = _get_job_ids(printer)
+            added = after - before
+            if added:
+                new_id = max(added)
+                break
+    except Exception as e:
+        # e.g. the pywin32 'win32timezone' import failing inside a frozen
+        # build. The page was already submitted, so treat it as printed.
+        return "printed", (f"submitted, but the print queue could not be "
+                           f"monitored ({e}); not re-sent to avoid duplicates")
     if new_id is None:
         # The page may well have printed: a small job can enter AND leave the
         # spooler between two polls, so "never seen" is NOT proof of failure.
@@ -259,15 +273,24 @@ def print_file(file_path, job, printer, tray_name):
         win32print.JOB_STATUS_DELETED: "job deleted",
     }
     while time.time() < deadline:
-        ids, jobmap = _get_job_ids(printer)
+        try:
+            ids, jobmap = _get_job_ids(printer)
+        except Exception as e:
+            # Already submitted — never claim it did not print.
+            return "printed", (f"submitted, but the print queue could not be "
+                               f"monitored ({e}); not re-sent")
         if new_id not in ids:
             return "printed", "completed"
         jstatus = jobmap[new_id].get("Status", 0)
         for bit, reason in error_bits.items():
             if jstatus & bit:
+                # The spooler rejected it (jam, out of paper, deleted).
                 return "failed", reason
         time.sleep(1)
-    return "failed", "timed out waiting for the printer"
+    # Timed out with the job still sitting in the queue: it is queued at the
+    # printer, not lost. Do NOT re-send — that is what caused duplicates.
+    return "printed", ("left in the printer queue after "
+                       f"{PRINT_CONFIRM_TIMEOUT}s; not re-sent")
 
 
 # ---------------------------------------------------------------------------

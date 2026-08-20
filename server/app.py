@@ -581,6 +581,7 @@ def vendor_dashboard(vendor):
         "printed": sum(1 for j in jobs if j["status"] == "printed"),
         "queued": sum(1 for j in jobs
                       if j["status"] in ("confirmed", "printing")),
+        "attention": sum(1 for j in jobs if j["status"] == "needs_attention"),
         "revenue": sum(float(j["price"] or 0) for j in jobs
                        if j.get("payment_status") == "paid"),
     }
@@ -839,8 +840,10 @@ def worker_jobs():
     if not billing.has_access(vendor):
         # Suspended/rejected vendors lose access until payment clears (§8.3).
         return jsonify({"error": f"subscription {vendor['status']}"}), 403
-    # Give back any job whose worker vanished mid-print before serving.
+    # Give back any job whose worker vanished mid-print, then take out of
+    # circulation anything that has already been tried too many times.
     db.release_stale_claims()
+    db.park_exhausted_jobs()
     jobs = db.get_vendor_jobs(vendor["id"], status="confirmed")
     out = []
     for j in jobs:
