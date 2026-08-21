@@ -93,3 +93,44 @@ def order_corners(pts):
                      pts[np.argmax(s)],    # BR: largest x+y
                      pts[np.argmax(d)]],   # BL: largest y-x
                     dtype=np.float32)
+
+
+def tilt_image(bgr, horizontal=0.0, vertical=0.0, rotate=0.0, zoom=1.0):
+    """Phone-gallery style perspective adjustment.
+
+    Instead of asking where the document's corners are, this tilts the whole
+    image around its axes the way the Perspective tool in a phone's photo
+    editor does:
+        horizontal  -1..1  swing left / right (rotate about the vertical axis)
+        vertical    -1..1  lean back / forward (rotate about the horizontal axis)
+        rotate      degrees, straighten a crooked shot
+        zoom        >1 crops in, used to hide the empty corners a tilt creates
+    Returns a BGR image the same size as the input.
+    """
+    h, w = bgr.shape[:2]
+    hf = float(np.clip(horizontal, -1.0, 1.0))
+    vf = float(np.clip(vertical, -1.0, 1.0))
+
+    # Move the source corners inward on one side; the homography then
+    # stretches that side back out, which is exactly a tilt about that axis.
+    dx, dy = 0.22 * w * hf, 0.22 * h * vf
+    src = np.array([[0, 0], [w, 0], [w, h], [0, h]], dtype=np.float32)
+    dst = np.array([
+        [0 + max(dx, 0), 0 + max(dy, 0)],
+        [w + min(dx, 0), 0 - min(dy, 0)],
+        [w + min(dx, 0), h + min(dy, 0)],
+        [0 + max(dx, 0), h - max(dy, 0)],
+    ], dtype=np.float32)
+
+    out = bgr
+    if abs(hf) > 1e-3 or abs(vf) > 1e-3:
+        M = cv2.getPerspectiveTransform(src, dst)
+        out = cv2.warpPerspective(bgr, M, (w, h), flags=cv2.INTER_CUBIC,
+                                  borderMode=cv2.BORDER_REPLICATE)
+
+    if abs(float(rotate)) > 1e-3 or abs(float(zoom) - 1.0) > 1e-3:
+        R = cv2.getRotationMatrix2D((w / 2, h / 2), float(rotate),
+                                    max(0.2, float(zoom)))
+        out = cv2.warpAffine(out, R, (w, h), flags=cv2.INTER_CUBIC,
+                             borderMode=cv2.BORDER_REPLICATE)
+    return out

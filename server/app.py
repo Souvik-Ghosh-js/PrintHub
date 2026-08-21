@@ -213,6 +213,40 @@ def warp_page():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/tilt_page", methods=["POST"])
+def tilt_page():
+    """Phone-gallery style perspective: tilt the image on its horizontal /
+    vertical axis, straighten and zoom — the same controls a phone's photo
+    editor offers. All values are optional and default to no change."""
+    f = request.files.get("file")
+    if not f:
+        return jsonify({"error": "no file"}), 400
+
+    def num(name, default=0.0):
+        try:
+            return float(request.form.get(name, default))
+        except (TypeError, ValueError):
+            return default
+
+    try:
+        bgr = docscan.decode_image(f.read())
+        if bgr is None:
+            return jsonify({"error": "could not decode image"}), 400
+        out = docscan.tilt_image(bgr,
+                                 horizontal=num("horizontal"),
+                                 vertical=num("vertical"),
+                                 rotate=num("rotate"),
+                                 zoom=num("zoom", 1.0))
+        mode = request.form.get("mode", "none")
+        if mode and mode != "none":
+            out = docscan.enhance_image(out, mode)
+        return send_file(io.BytesIO(docscan.encode_jpeg(out)),
+                         mimetype="image/jpeg")
+    except Exception as e:
+        print(f"[tilt_page] error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 # --- ID-card compose (ported from the prototype, extended for single page) ---
 def compose_id_pdf(sides, layout, enhance_mode):
     """Compose 1 or 2 card sides on one A4 portrait page at REAL card size
