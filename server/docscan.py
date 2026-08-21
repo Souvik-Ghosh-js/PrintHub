@@ -69,3 +69,27 @@ def encode_jpeg(bgr, quality=92) -> bytes:
     if not ok:
         raise RuntimeError("jpeg encode failed")
     return enc.tobytes()
+
+
+def warp_perspective(bgr, corners):
+    """Perspective-correct a photo to a flat, front-parallel page (spec §3).
+
+    corners: 4 (x, y) points in image pixels, ordered TL, TR, BR, BL — what
+    the customer's drag handles produce. Returns the warped BGR image.
+    """
+    from docenh.perspective.warp import warp_document
+    pts = np.asarray(corners, dtype=np.float32).reshape(4, 2)
+    warped, _H = warp_document(bgr, pts)
+    return warped
+
+
+def order_corners(pts):
+    """Sort 4 arbitrary points into TL, TR, BR, BL."""
+    pts = np.asarray(pts, dtype=np.float32).reshape(4, 2)
+    s = pts.sum(axis=1)
+    d = np.diff(pts, axis=1).ravel()
+    return np.array([pts[np.argmin(s)],    # TL: smallest x+y
+                     pts[np.argmin(d)],    # TR: smallest y-x
+                     pts[np.argmax(s)],    # BR: largest x+y
+                     pts[np.argmax(d)]],   # BL: largest y-x
+                    dtype=np.float32)

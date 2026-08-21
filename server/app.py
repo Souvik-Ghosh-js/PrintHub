@@ -187,6 +187,32 @@ def enhance_page():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/warp_page", methods=["POST"])
+def warp_page():
+    """Perspective correction (spec §3): the customer drags the four corner
+    handles over their photo and we flatten it to a front-parallel page.
+    corners = JSON [[x,y] x4] in image pixels. Optionally enhances too."""
+    f = request.files.get("file")
+    if not f:
+        return jsonify({"error": "no file"}), 400
+    try:
+        corners = json.loads(request.form.get("corners", "[]"))
+        if len(corners) != 4:
+            return jsonify({"error": "need exactly 4 corners"}), 400
+        bgr = docscan.decode_image(f.read())
+        if bgr is None:
+            return jsonify({"error": "could not decode image"}), 400
+        out = docscan.warp_perspective(bgr, docscan.order_corners(corners))
+        mode = request.form.get("mode", "none")
+        if mode and mode != "none":
+            out = docscan.enhance_image(out, mode)
+        return send_file(io.BytesIO(docscan.encode_jpeg(out)),
+                         mimetype="image/jpeg")
+    except Exception as e:
+        print(f"[warp_page] error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 # --- ID-card compose (ported from the prototype, extended for single page) ---
 def compose_id_pdf(sides, layout, enhance_mode):
     """Compose 1 or 2 card sides on one A4 portrait page at REAL card size
@@ -262,8 +288,32 @@ def build_document_pdf(files, enhance_mode):
     return out.getvalue()
 
 
+MAX_IMAGE_PAGES = 10          # customer may attach up to 10 photos
+MAX_PDF_PAGES = 100           # sanity cap for an uploaded PDF
+
+
+def _pdf_page_count(data: bytes) -> int:
+    """Page count of an uploaded PDF (raises ValueError if unreadable)."""
+    try:
+        import fitz  # PyMuPDF
+        with fitz.open(stream=data, filetype="pdf") as doc:
+            if doc.needs_pass:
+                raise ValueError("this PDF is password-protected")
+            return doc.page_count
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(f"could not read the PDF ({e})")
+
+
 def _order_pdf_from_request(doc_format):
-    """Build the order PDF + page count from the uploaded form files."""
+    """Build the order PDF + page count from the uploaded form files.
+
+    Three shapes are supported:
+      * an ID format (aadhaar/pan/voter) -> 1 or 2 cropped sides on one sheet
+      * an uploaded PDF                  -> printed as-is, all pages
+      * up to MAX_IMAGE_PAGES photos     -> one A4 page each
+    """
     enhance_mode = request.form.get("enhance_mode", "none")
     if doc_format in config.DOC_FORMATS:
         sides = []
@@ -275,11 +325,50 @@ def _order_pdf_from_request(doc_format):
             raise ValueError("upload at least one side")
         layout = config.DOC_FORMATS[doc_format]["layout"]
         return compose_id_pdf(sides, layout, enhance_mode), 1
-    # Generic multi-page document scan.
+
+    # A PDF the customer uploaded: print it exactly as supplied.
+    pdf = request.files.get("pdf")
+    if pdf:
+        data = pdf.read()
+        if not data[:5].startswith(b"%PDF"):
+            raise ValueError("that file is not a valid PDF")
+        pages = _pdf_page_count(data)
+        if pages < 1:
+            raise ValueError("that PDF has no pages")
+        if pages > MAX_PDF_PAGES:
+            raise ValueError(f"PDFs are limited to {MAX_PDF_PAGES} pages")
+        return data, pages
+
+    # Photos -> one A4 page each.
     files = request.files.getlist("pages")
     if not files:
         raise ValueError("no pages uploaded")
+    if len(files) > MAX_IMAGE_PAGES:
+        raise ValueError(f"you can attach at most {MAX_IMAGE_PAGES} images")
     return build_document_pdf(files, enhance_mode), len(files)
+
+
+@app.route("/shop/<code>/pdf-info", methods=["POST"])
+def shop_pdf_info(code):
+    """Page count for an uploaded PDF so the customer sees the real price
+    before paying. The server is the authority here — the price charged is
+    computed from this same count."""
+    vendor = billing.refresh_status(db.get_vendor_by_code(code))
+    if not billing.has_access(vendor):
+        return jsonify({"error": "shop unavailable"}), 404
+    f = request.files.get("pdf")
+    if not f:
+        return jsonify({"error": "no pdf uploaded"}), 400
+    data = f.read()
+    if not data[:5].startswith(b"%PDF"):
+        return jsonify({"error": "that file is not a valid PDF"}), 400
+    try:
+        pages = _pdf_page_count(data)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    if pages > MAX_PDF_PAGES:
+        return jsonify({"error": f"PDFs are limited to {MAX_PDF_PAGES} pages"}), 400
+    return jsonify({"pages": pages})
 
 
 @app.route("/shop/<code>/preview", methods=["POST"])

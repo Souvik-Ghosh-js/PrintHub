@@ -66,8 +66,53 @@
     .slots.stacked .slot { width: 76vw; }
     .slot-hint { font-size: .72rem; }
   }
-  #doc-pages { display: flex; gap: .6rem; flex-wrap: wrap; }
-  #doc-pages .slot { width: 104px; aspect-ratio: 3 / 4; }
+  /* ---------- document pages grid ---------- */
+  #doc-pages { display: grid; gap: .6rem;
+               grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+  .page-card { position: relative; border: 1.5px solid var(--line);
+               border-radius: var(--r-sm); overflow: hidden;
+               background: var(--surface); aspect-ratio: 3 / 4; cursor: pointer; }
+  .page-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .page-card:hover { border-color: var(--brand-500); }
+  .page-card .num { position: absolute; left: 5px; top: 5px; z-index: 2;
+                    background: rgba(15,23,42,.75); color: #fff; font-size: .68rem;
+                    font-weight: 700; padding: .08rem .35rem; border-radius: 5px; }
+  .page-card .del { position: absolute; right: 4px; top: 4px; z-index: 2;
+                    width: 22px; height: 22px; border: none; border-radius: 50%;
+                    background: rgba(15,23,42,.75); color: #fff; cursor: pointer;
+                    font-size: .7rem; line-height: 1; }
+  .page-card .del:hover { background: var(--bad); }
+  .page-card .edited { position: absolute; left: 5px; bottom: 5px; z-index: 2;
+                       background: var(--brand-600); color: #fff; font-size: .6rem;
+                       font-weight: 700; padding: .08rem .3rem; border-radius: 4px; }
+  .page-card .tap { position: absolute; inset: auto 0 0 0; z-index: 1;
+                    background: linear-gradient(transparent, rgba(15,23,42,.72));
+                    color: #fff; font-size: .62rem; text-align: center;
+                    padding: .8rem .2rem .25rem; }
+  .add-card { display: grid; place-items: center; border: 2px dashed var(--line);
+              border-radius: var(--r-sm); aspect-ratio: 3 / 4; cursor: pointer;
+              background: var(--surface-2); color: var(--muted);
+              font-size: .72rem; font-weight: 600; text-align: center; gap: .1rem; }
+  .add-card:hover { border-color: var(--brand-500); background: var(--brand-50);
+                    color: var(--brand-700); }
+  .add-card .plus { font-size: 1.4rem; line-height: 1; color: var(--brand-500); }
+
+  /* uploaded PDF card */
+  .pdf-card { display: flex; align-items: center; gap: .8rem; padding: .9rem;
+              border: 1.5px solid var(--brand-500); border-radius: var(--r);
+              background: var(--brand-50); }
+  .pdf-ico { font-size: 1.8rem; }
+
+  /* ---------- image editor ---------- */
+  #edit-stage { position: relative; max-height: 52vh; overflow: hidden;
+                background: #0f172a; border-radius: var(--r-sm);
+                display: grid; place-items: center; }
+  #edit-canvas { max-width: 100%; max-height: 52vh; display: block;
+                 touch-action: none; }
+  .edit-tools { display: flex; gap: .4rem; flex-wrap: wrap; margin: .7rem 0; }
+  .edit-tools .btn { flex: 1 1 auto; }
+  .edit-hint { font-size: .78rem; color: var(--muted); min-height: 1.2em;
+               margin-bottom: .3rem; }
 
   /* ---------- summary bar (fixed to the bottom of the viewport) ---------- */
   .summary {
@@ -150,9 +195,40 @@
 
 <div class="card" id="doc-panel" hidden>
   <div class="step"><span class="step-n">2</span><h2>Add your pages</h2></div>
-  <div id="doc-pages"></div>
-  <button type="button" class="btn btn-ghost btn-sm" id="add-page-btn"
-          style="margin-top:.8rem;">＋ Add a page</button>
+
+  <!-- choose between photos and a PDF -->
+  <div id="doc-empty">
+    <div class="btn-row" style="margin-bottom:.6rem;">
+      <button type="button" class="btn btn-primary" id="pick-photos-btn">
+        📷 Add photos</button>
+      <button type="button" class="btn btn-ghost" id="pick-pdf-btn">
+        📄 Upload a PDF</button>
+    </div>
+    <p class="muted tiny" style="margin:0;">Up to <strong>10 photos</strong>
+      (one page each) or a single PDF printed exactly as it is.</p>
+  </div>
+
+  <!-- uploaded PDF -->
+  <div id="pdf-chosen" hidden>
+    <div class="pdf-card">
+      <span class="pdf-ico">📄</span>
+      <span style="flex:1; min-width:0;">
+        <strong id="pdf-name" style="display:block; overflow:hidden;
+                text-overflow:ellipsis; white-space:nowrap;"></strong>
+        <span class="muted tiny" id="pdf-meta">reading…</span>
+      </span>
+      <button type="button" class="btn btn-ghost btn-sm" id="pdf-preview-btn">Preview</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="pdf-remove-btn">✕</button>
+    </div>
+  </div>
+
+  <!-- photo pages -->
+  <div id="photos-chosen" hidden>
+    <div id="doc-pages"></div>
+    <p class="muted tiny" style="margin:.7rem 0 0;">
+      Tap any page to crop, rotate or fix its perspective.
+      <span id="page-count-note"></span></p>
+  </div>
 </div>
 
 <div class="card">
@@ -200,6 +276,30 @@
   </div>
 </div>
 
+<!-- full image editor: crop / rotate / perspective / enhance -->
+<div class="modal" id="edit-modal">
+  <div class="modal-box" style="max-width:720px;">
+    <div class="row-between" style="margin-bottom:.6rem;">
+      <h2 style="margin:0;">Edit page <span id="edit-page-n"></span></h2>
+      <span class="muted tiny" id="edit-mode-label">Crop</span>
+    </div>
+    <div class="edit-hint" id="edit-hint"></div>
+    <div id="edit-stage"><canvas id="edit-canvas"></canvas></div>
+    <div class="edit-tools">
+      <button type="button" class="btn btn-ghost btn-sm" id="e-crop">⬚ Crop</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="e-persp">⟡ Perspective</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="e-rotl">⟲</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="e-rotr">⟳</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="e-auto">✨ Auto-fix</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="e-reset">Reset</button>
+    </div>
+    <div class="btn-row" style="justify-content:flex-end;">
+      <button type="button" class="btn btn-ghost" id="edit-cancel">Cancel</button>
+      <button type="button" class="btn btn-primary" id="edit-apply">Apply</button>
+    </div>
+  </div>
+</div>
+
 <!-- crop editor -->
 <div class="modal" id="crop-modal">
   <div class="modal-box">
@@ -227,6 +327,8 @@
 </div>
 
 <input type="file" id="file-input" accept="image/*" hidden>
+<input type="file" id="photos-input" accept="image/*" multiple hidden>
+<input type="file" id="pdf-input" accept="application/pdf" hidden>
 {% endblock %}
 
 {% block scripts %}
@@ -235,7 +337,7 @@ const PRICES = { bw: {{ vendor.price_bw }}, color: {{ vendor.price_colour }} };
 const SHOP = "{{ vendor.shop_code }}";
 
 const state = { format: "aadhaar", layout: "side_by_side",
-                sides: { front: null, back: null }, pages: [] };
+                sides: { front: null, back: null }, pages: [], pdf: null };
 const $ = (id) => document.getElementById(id);
 
 /* ---------------- format chooser ---------------- */
@@ -248,6 +350,7 @@ fmtBtns.forEach(btn => btn.addEventListener("click", () => {
   const isDoc = state.format === "document";
   $("id-panel").hidden = isDoc;
   $("doc-panel").hidden = !isDoc;
+  if (isDoc) renderDocPanel();
   $("id-slots").classList.toggle("stacked", state.layout === "stacked");
   $("layout-note").textContent = isDoc ? ""
     : state.layout === "stacked"
@@ -378,30 +481,315 @@ function renderSlot(side) {
   });
 });
 
-$("add-page-btn").addEventListener("click", () => pickFile("newpage"));
+/* ---------------- document mode: photos or a PDF ---------------- */
+const MAX_PAGES = 10;
+
+function blobToDataURL(blob) {
+  return new Promise(res => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.readAsDataURL(blob);
+  });
+}
+
+$("pick-photos-btn").addEventListener("click", () => $("photos-input").click());
+$("photos-input").addEventListener("change", async () => {
+  const files = Array.from($("photos-input").files || []);
+  $("photos-input").value = "";
+  if (files.length) await addPhotos(files);
+});
+
+async function addPhotos(files) {
+  const room = MAX_PAGES - state.pages.length;
+  if (room <= 0) { alert("You can attach at most " + MAX_PAGES + " images."); return; }
+  const take = files.slice(0, room);
+  if (files.length > room) {
+    alert("Only " + room + " more image(s) can be added (limit " + MAX_PAGES + ").");
+  }
+  for (const f of take) {
+    const dataUrl = await downscale(await blobToDataURL(f));
+    const blob = await (await fetch(dataUrl)).blob();
+    state.pages.push({ blob, url: URL.createObjectURL(blob),
+                       original: dataUrl, edited: false });
+  }
+  state.pdf = null;
+  renderDocPanel();
+  updatePrice();
+}
+
+$("pick-pdf-btn").addEventListener("click", () => $("pdf-input").click());
+$("pdf-input").addEventListener("change", async () => {
+  const f = $("pdf-input").files[0];
+  $("pdf-input").value = "";
+  if (!f) return;
+  if (f.size > 40 * 1024 * 1024) { alert("That PDF is larger than 40 MB."); return; }
+  state.pages = [];
+  state.pdf = { file: f, pages: null, url: URL.createObjectURL(f) };
+  renderDocPanel();
+  $("pdf-name").textContent = f.name;
+  $("pdf-meta").textContent = "counting pages...";
+  try {
+    const fd = new FormData();
+    fd.append("pdf", f, f.name);
+    const r = await fetch("/shop/" + SHOP + "/pdf-info", { method: "POST", body: fd });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "unreadable");
+    state.pdf.pages = d.pages;
+    $("pdf-meta").textContent = d.pages + " page" + (d.pages > 1 ? "s" : "") +
+      " \u00b7 " + (f.size / 1048576).toFixed(1) + " MB";
+  } catch (e) {
+    $("pdf-meta").textContent = "Could not read this PDF \u2014 " + e.message;
+    state.pdf = null;
+  }
+  updatePrice();
+});
+
+$("pdf-remove-btn").addEventListener("click", () => {
+  state.pdf = null; renderDocPanel(); updatePrice();
+});
+$("pdf-preview-btn").addEventListener("click", () => {
+  if (state.pdf) window.open(state.pdf.url, "_blank");
+});
+
+function renderDocPanel() {
+  const hasPdf = !!state.pdf, hasPhotos = state.pages.length > 0;
+  $("doc-empty").hidden = hasPdf || hasPhotos;
+  $("pdf-chosen").hidden = !hasPdf;
+  $("photos-chosen").hidden = !hasPhotos;
+  if (hasPhotos) renderDocPages();
+}
 
 function renderDocPages() {
   const wrap = $("doc-pages");
   wrap.innerHTML = "";
   state.pages.forEach((p, i) => {
     const div = document.createElement("div");
-    div.className = "slot filled";
-    div.innerHTML = `<button type="button" class="del">✕</button>`;
+    div.className = "page-card";
+    div.innerHTML =
+      '<span class="num">' + (i + 1) + '</span>' +
+      '<button type="button" class="del" title="Remove">\u2715</button>' +
+      (p.edited ? '<span class="edited">edited</span>' : '') +
+      '<span class="tap">tap to edit</span>';
     const img = document.createElement("img");
     img.src = p.url;
-    div.appendChild(img);
+    div.insertBefore(img, div.firstChild);
     div.querySelector(".del").addEventListener("click", (e) => {
       e.stopPropagation();
-      state.pages.splice(i, 1); renderDocPages(); updatePrice();
+      URL.revokeObjectURL(p.url);
+      state.pages.splice(i, 1); renderDocPanel(); updatePrice();
     });
+    div.addEventListener("click", () => openEditor(i));
     wrap.appendChild(div);
+  });
+  if (state.pages.length < MAX_PAGES) {
+    const add = document.createElement("div");
+    add.className = "add-card";
+    add.innerHTML = '<span class="plus">\uff0b</span><span>Add page</span>';
+    add.addEventListener("click", () => $("photos-input").click());
+    wrap.appendChild(add);
+  }
+  $("page-count-note").textContent =
+    state.pages.length + " of " + MAX_PAGES + " pages used.";
+}
+
+/* ---------------- image editor: crop / rotate / perspective ---------------- */
+const EDIT = { idx: -1, img: null, mode: "crop", pts: [], drag: -1,
+               scale: 1, canvas: null, ctx: null, working: null };
+
+function loadImage(src) {
+  return new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = rej;
+    im.src = src;
   });
 }
 
+async function openEditor(idx) {
+  EDIT.idx = idx;
+  const page = state.pages[idx];
+  EDIT.working = page.url;
+  EDIT.img = await loadImage(page.url);
+  EDIT.canvas = $("edit-canvas");
+  EDIT.ctx = EDIT.canvas.getContext("2d");
+  $("edit-page-n").textContent = idx + 1;
+  setMode("crop");
+  $("edit-modal").classList.add("open");
+}
+
+function setMode(mode) {
+  EDIT.mode = mode;
+  const im = EDIT.img;
+  const maxW = Math.min(660, window.innerWidth - 60);
+  const maxH = Math.round(window.innerHeight * 0.52);
+  EDIT.scale = Math.min(maxW / im.width, maxH / im.height, 1);
+  EDIT.canvas.width = Math.round(im.width * EDIT.scale);
+  EDIT.canvas.height = Math.round(im.height * EDIT.scale);
+  const w = EDIT.canvas.width, h = EDIT.canvas.height;
+  const m = mode === "crop" ? Math.min(w, h) * 0.06 : 0;
+  EDIT.pts = [[m, m], [w - m, m], [w - m, h - m], [m, h - m]];
+  $("edit-mode-label").textContent = mode === "crop" ? "Crop" : "Perspective";
+  $("edit-hint").textContent = mode === "crop"
+    ? "Drag the corners to crop. Everything inside is kept."
+    : "Put a handle on each corner of the document \u2014 it will be flattened.";
+  ["e-crop", "e-persp"].forEach(id => $(id).classList.remove("btn-primary"));
+  $(mode === "crop" ? "e-crop" : "e-persp").classList.add("btn-primary");
+  drawEditor();
+}
+
+function drawEditor() {
+  const c = EDIT.canvas, ctx = EDIT.ctx, pts = EDIT.pts;
+  ctx.clearRect(0, 0, c.width, c.height);
+  ctx.drawImage(EDIT.img, 0, 0, c.width, c.height);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, c.width, c.height);
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < 4; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(8,15,31,.55)";
+  ctx.fill("evenodd");
+  ctx.restore();
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < 4; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+  ctx.closePath();
+  ctx.strokeStyle = "#6366f1"; ctx.lineWidth = 2; ctx.stroke();
+  pts.forEach(pt => {
+    ctx.beginPath(); ctx.arc(pt[0], pt[1], 9, 0, Math.PI * 2);
+    ctx.fillStyle = "#fff"; ctx.fill();
+    ctx.strokeStyle = "#4f46e5"; ctx.lineWidth = 3; ctx.stroke();
+  });
+}
+
+function canvasPos(ev) {
+  const r = EDIT.canvas.getBoundingClientRect();
+  const t = ev.touches ? ev.touches[0] : ev;
+  return [(t.clientX - r.left) * (EDIT.canvas.width / r.width),
+          (t.clientY - r.top) * (EDIT.canvas.height / r.height)];
+}
+
+function startDrag(ev) {
+  const pos = canvasPos(ev);
+  let best = -1, bestD = 32;
+  EDIT.pts.forEach((pt, i) => {
+    const d = Math.hypot(pt[0] - pos[0], pt[1] - pos[1]);
+    if (d < bestD) { bestD = d; best = i; }
+  });
+  EDIT.drag = best;
+  if (best >= 0) ev.preventDefault();
+}
+function moveDrag(ev) {
+  if (EDIT.drag < 0) return;
+  ev.preventDefault();
+  const pos = canvasPos(ev);
+  EDIT.pts[EDIT.drag] = [Math.max(0, Math.min(EDIT.canvas.width, pos[0])),
+                         Math.max(0, Math.min(EDIT.canvas.height, pos[1]))];
+  drawEditor();
+}
+function endDrag() { EDIT.drag = -1; }
+
+["mousedown", "touchstart"].forEach(e =>
+  $("edit-canvas").addEventListener(e, startDrag, { passive: false }));
+["mousemove", "touchmove"].forEach(e =>
+  window.addEventListener(e, moveDrag, { passive: false }));
+["mouseup", "touchend"].forEach(e => window.addEventListener(e, endDrag));
+
+$("e-crop").addEventListener("click", () => setMode("crop"));
+$("e-persp").addEventListener("click", () => setMode("perspective"));
+$("e-reset").addEventListener("click", async () => {
+  const page = state.pages[EDIT.idx];
+  EDIT.working = page.original;
+  EDIT.img = await loadImage(page.original);
+  setMode(EDIT.mode);
+});
+
+async function rotate(deg) {
+  const im = EDIT.img;
+  const c = document.createElement("canvas");
+  c.width = deg % 180 === 0 ? im.width : im.height;
+  c.height = deg % 180 === 0 ? im.height : im.width;
+  const x = c.getContext("2d");
+  x.translate(c.width / 2, c.height / 2);
+  x.rotate(deg * Math.PI / 180);
+  x.drawImage(im, -im.width / 2, -im.height / 2);
+  EDIT.working = c.toDataURL("image/jpeg", 0.92);
+  EDIT.img = await loadImage(EDIT.working);
+  setMode(EDIT.mode);
+}
+$("e-rotl").addEventListener("click", () => rotate(-90));
+$("e-rotr").addEventListener("click", () => rotate(90));
+
+$("e-auto").addEventListener("click", async () => {
+  const btn = $("e-auto"); btn.disabled = true;
+  $("edit-hint").textContent = "Finding the document...";
+  try {
+    const blob = await (await fetch(EDIT.working)).blob();
+    const fd = new FormData();
+    fd.append("file", blob, "page.jpg");
+    const d = await (await fetch("/api/detect_document",
+                                 { method: "POST", body: fd })).json();
+    if (d.ok && Array.isArray(d.corners)) {
+      const pts = d.corners.map(c => [c[0] * EDIT.scale, c[1] * EDIT.scale]);
+      setMode("perspective");
+      EDIT.pts = pts;
+      drawEditor();
+      $("edit-hint").textContent = "Edges detected \u2014 check the handles, then Apply.";
+    } else {
+      $("edit-hint").textContent = "Could not detect the edges \u2014 adjust by hand.";
+    }
+  } catch (e) {
+    $("edit-hint").textContent = "Auto-fix unavailable \u2014 adjust by hand.";
+  } finally { btn.disabled = false; }
+});
+
+$("edit-cancel").addEventListener("click", () =>
+  $("edit-modal").classList.remove("open"));
+
+$("edit-apply").addEventListener("click", async () => {
+  const btn = $("edit-apply"); btn.disabled = true; btn.textContent = "Applying...";
+  try {
+    const page = state.pages[EDIT.idx];
+    const pts = EDIT.pts.map(pt => [pt[0] / EDIT.scale, pt[1] / EDIT.scale]);
+    let outBlob;
+    if (EDIT.mode === "perspective") {
+      const src = await (await fetch(EDIT.working)).blob();
+      const fd = new FormData();
+      fd.append("file", src, "page.jpg");
+      fd.append("corners", JSON.stringify(pts));
+      const r = await fetch("/api/warp_page", { method: "POST", body: fd });
+      if (!r.ok) throw new Error("perspective correction failed");
+      outBlob = await r.blob();
+    } else {
+      const xs = pts.map(pt => pt[0]), ys = pts.map(pt => pt[1]);
+      const x0 = Math.max(0, Math.min.apply(null, xs));
+      const y0 = Math.max(0, Math.min.apply(null, ys));
+      const w = Math.min(EDIT.img.width - x0, Math.max.apply(null, xs) - x0);
+      const h = Math.min(EDIT.img.height - y0, Math.max.apply(null, ys) - y0);
+      if (w < 10 || h < 10) throw new Error("that crop is too small");
+      const c = document.createElement("canvas");
+      c.width = Math.round(w); c.height = Math.round(h);
+      c.getContext("2d").drawImage(EDIT.img, x0, y0, w, h, 0, 0, c.width, c.height);
+      outBlob = await new Promise(res => c.toBlob(res, "image/jpeg", 0.92));
+    }
+    URL.revokeObjectURL(page.url);
+    page.blob = outBlob;
+    page.url = URL.createObjectURL(outBlob);
+    page.edited = true;
+    $("edit-modal").classList.remove("open");
+    renderDocPages();
+  } catch (e) {
+    alert("Could not apply the change: " + e.message);
+  } finally { btn.disabled = false; btn.textContent = "Apply"; }
+});
+
 /* ---------------- price ---------------- */
 function pageCount() {
-  return state.format === "document" ? state.pages.length
-    : ((state.sides.front || state.sides.back) ? 1 : 0);
+  if (state.format !== "document") {
+    return (state.sides.front || state.sides.back) ? 1 : 0;
+  }
+  if (state.pdf) return state.pdf.pages || 0;   // null while still counting
+  return state.pages.length;
 }
 function updatePrice() {
   const mode = $("color-mode").value;
@@ -410,8 +798,9 @@ function updatePrice() {
   const total = PRICES[mode] * pages * copies;
   $("price").textContent = "₹" + total.toFixed(2);
   $("price-note").textContent = pages
-    ? `${pages} page${pages > 1 ? "s" : ""} × ${copies} cop${copies > 1 ? "ies" : "y"}`
-    : "Add a page to see the price";
+    ? `${state.pdf ? "PDF · " : ""}${pages} page${pages > 1 ? "s" : ""}` +
+      ` × ${copies} cop${copies > 1 ? "ies" : "y"}`
+    : (state.pdf ? "Reading the PDF…" : "Add a page to see the price");
   $("order-btn").disabled = pages === 0;
   $("preview-btn").disabled = pages === 0;
 }
@@ -428,7 +817,11 @@ function buildForm() {
   fd.append("copies", $("copies").value || "1");
   fd.append("customer_phone", $("customer-phone").value || "");
   if (state.format === "document") {
-    state.pages.forEach((p, i) => fd.append("pages", p.blob, `page${i + 1}.jpg`));
+    if (state.pdf) {
+      fd.append("pdf", state.pdf.file, state.pdf.file.name);
+    } else {
+      state.pages.forEach((p, i) => fd.append("pages", p.blob, `page${i + 1}.jpg`));
+    }
   } else {
     if (state.sides.front) fd.append("front", state.sides.front.blob, "front.jpg");
     if (state.sides.back) fd.append("back", state.sides.back.blob, "back.jpg");
