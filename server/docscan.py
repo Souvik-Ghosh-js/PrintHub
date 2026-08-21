@@ -72,6 +72,149 @@ def find_corners_docaligner(bgr):
     return np.asarray(pts, dtype=np.float32), float(np.min(peaks))
 
 
+def _is_multi_panel_shape(quad, min_aspect=1.95):
+    """A folded multi-panel document is markedly wider (or taller) than a
+    single ID card, which is about 1.6:1. Used to avoid overriding a good
+    single-card detection with a sprawling panel box."""
+    q = order_corners(np.asarray(quad, dtype=np.float32))
+    wid = (np.linalg.norm(q[1] - q[0]) + np.linalg.norm(q[2] - q[3])) / 2
+    hei = (np.linalg.norm(q[3] - q[0]) + np.linalg.norm(q[2] - q[1])) / 2
+    if min(wid, hei) < 1e-6:
+        return False
+    return (max(wid, hei) / min(wid, hei)) >= min_aspect
+
+
+def find_document_panels(bgr, min_frac=0.045):
+    """Boundary of a document made of SEVERAL panels.
+
+    The old long-format Aadhaar letter is printed as two panels side by side
+    with a cut line between them. Contour detectors lock onto one panel and
+    crop the other half away, so here we find every paper-like region and
+    return the quad that encloses all of them.
+
+    Returns (corners (4,2) or None, confidence).
+    """
+    h, w = bgr.shape[:2]
+    scale = 800.0 / max(h, w)
+    small = cv2.resize(bgr, None, fx=scale, fy=scale) if scale < 1 else bgr.copy()
+    # A document photographed edge-to-edge has no background border, so its
+    # contour merges with the frame. Add a synthetic dark border, then undo
+    # the offset afterwards.
+    pad = max(6, int(0.02 * max(small.shape[:2])))
+    small = cv2.copyMakeBorder(small, pad, pad, pad, pad,
+                               cv2.BORDER_CONSTANT, value=(0, 0, 0))
+    sh, sw = small.shape[:2]
+    area = float(sh * sw)
+
+    # Paper is bright and near-neutral; the backgrounds these documents are
+    # photographed on (pink sheet, wood, cloth) are darker and/or coloured.
+    # Combine three cues and keep whichever separates panels best.
+    hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
+    sat, val = hsv[:, :, 1], hsv[:, :, 2]
+    b, g, r = cv2.split(small.astype(np.int16))
+    # neutrality: paper has little spread between channels
+    spread = (np.maximum(np.maximum(b, g), r) -
+              np.minimum(np.minimum(b, g), r)).astype(np.uint8)
+
+    masks = []
+    otsu_v = cv2.threshold(val, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+    masks.append(((otsu_v > 0) & (spread < 60)).astype(np.uint8) * 255)
+    masks.append(((val > 150) & (sat < 70)).astype(np.uint8) * 255)
+    masks.append(((spread < 40) & (val > int(np.percentile(val, 45)))
+                  ).astype(np.uint8) * 255)
+
+    best_panels, best_mask_score, best_nregions = None, -1.0, 0
+    kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    kernel_light = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 25))
+    for m in masks:
+        m = cv2.morphologyEx(m, cv2.MORPH_OPEN, kernel_open)
+        # Light closing keeps the cut line between panels visible, so we can
+        # tell a folded letter from a single sheet...
+        light = cv2.morphologyEx(m, cv2.MORPH_CLOSE, kernel_light)
+        lc, _ = cv2.findContours(light, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        n_regions = len([c for c in lc if cv2.contourArea(c) > area * min_frac])
+        # ...while strong closing fills the print inside each panel, giving a
+        # clean outline to fit the quad to.
+        strong = cv2.morphologyEx(m, cv2.MORPH_CLOSE, kernel_close)
+        cnts, _ = cv2.findContours(strong, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cand = [c for c in cnts if cv2.contourArea(c) > area * min_frac]
+        if not cand:
+            continue
+        cov = sum(cv2.contourArea(c) for c in cand) / area
+        # prefer masks that cover a believable amount of the frame; a mask
+        # covering nearly everything has simply merged doc and background.
+        score = cov if cov < 0.92 else 0.1
+        if score > best_mask_score:
+            best_mask_score, best_panels, best_nregions = score, cand, n_regions
+
+    panels = best_panels
+    if not panels:
+        return None, 0.0
+
+    # Keep panels that are roughly as "deep" as the biggest one and close to
+    # it, so we merge the halves of one letter without swallowing clutter.
+    boxes = [cv2.boundingRect(c) for c in panels]
+    big = max(range(len(panels)), key=lambda i: cv2.contourArea(panels[i]))
+    bx, by, bw, bh = boxes[big]
+    keep = []
+    for c, (x, y, ww, hh) in zip(panels, boxes):
+        vertical_overlap = (min(by + bh, y + hh) - max(by, y)) / max(1, min(bh, hh))
+        horizontal_overlap = (min(bx + bw, x + ww) - max(bx, x)) / max(1, min(bw, ww))
+        near = (vertical_overlap > 0.55 or horizontal_overlap > 0.55)
+        if c is panels[big] or near:
+            keep.append(c)
+    if not keep:
+        return None, 0.0
+
+    allpts = np.vstack(keep)
+    covered = sum(cv2.contourArea(c) for c in keep) / area
+    if covered < min_frac:
+        return None, 0.0
+
+    # The panels must line up like a folded letter: similar depth, sitting
+    # side by side (or stacked), not scattered around the frame.
+    rects = [cv2.boundingRect(c) for c in keep]
+    xs0 = min(r[0] for r in rects); ys0 = min(r[1] for r in rects)
+    xs1 = max(r[0] + r[2] for r in rects); ys1 = max(r[1] + r[3] for r in rects)
+    span_w, span_h = xs1 - xs0, ys1 - ys0
+    if span_w < 1 or span_h < 1:
+        return None, 0.0
+    side_by_side = all(
+        (min(ys1, r[1] + r[3]) - max(ys0, r[1])) > 0.55 * span_h for r in rects)
+    stacked = all(
+        (min(xs1, r[0] + r[2]) - max(xs0, r[0])) > 0.55 * span_w for r in rects)
+    if not (side_by_side or stacked):
+        return None, 0.0
+
+    quad = cv2.boxPoints(cv2.minAreaRect(allpts)).astype(np.float32)
+    quad -= pad                       # remove the synthetic border
+    if scale < 1:
+        quad /= scale
+    quad[:, 0] = np.clip(quad[:, 0], 0, w - 1)
+    quad[:, 1] = np.clip(quad[:, 1], 0, h - 1)
+
+    # Confidence: how much of the enclosing quad is actually paper (a tight
+    # fit around two panels scores high; a sprawling box over clutter does not).
+    qa = cv2.contourArea(quad) / float(w * h)
+    if qa > 0.97:            # essentially the whole frame -> not a real find
+        return None, 0.0
+    fill = min(1.0, covered / max(qa, 1e-6))
+    if fill < 0.62:          # lots of non-paper inside the box
+        return None, 0.0
+
+    # This detector is for MULTI-PANEL documents. Accept only when the mask
+    # actually saw separate panels, or the outline is clearly letter-shaped
+    # (much wider than a single ID card). Otherwise let the single-document
+    # detectors handle it — they are more accurate there.
+    quad_ordered = order_corners(quad)
+    if not (best_nregions >= 2 or _is_multi_panel_shape(quad_ordered)):
+        return None, 0.0
+
+    conf = float(np.clip(0.45 + 0.5 * fill, 0.0, 0.97))
+    return quad_ordered, conf
+
+
 def detect_corners(bgr):
     """Detect document corners.
 
@@ -81,11 +224,31 @@ def detect_corners(bgr):
     """
     results = []
 
+    # Multi-panel documents (the old long-format Aadhaar letter is two panels
+    # side by side) must be handled before the single-card detectors, which
+    # would happily crop one panel and throw the other half away.
+    panels_quad = None
+    try:
+        panels_quad, panels_conf = find_document_panels(bgr)
+        if panels_quad is not None:
+            results.append((panels_quad, panels_conf, "panels"))
+    except Exception as e:
+        print(f"[docscan] panel detector failed ({e})")
+
     if os.path.exists(DOCALIGNER_ONNX):
         try:
             corners, conf = find_corners_docaligner(bgr)
+            corners = order_corners(corners)
             if conf >= DOCALIGNER_MIN_PEAK:
-                return order_corners(corners), conf, "docaligner"
+                # If a multi-panel document was found and DocAligner's quad
+                # covers appreciably less of it, DocAligner has locked onto a
+                # single panel — prefer the full document.
+                if panels_quad is not None and panels_conf >= 0.6:
+                    a_da = abs(cv2.contourArea(corners.astype(np.float32)))
+                    a_pn = abs(cv2.contourArea(panels_quad.astype(np.float32)))
+                    if a_pn > a_da * 1.35 and _is_multi_panel_shape(panels_quad):
+                        return panels_quad, panels_conf, "panels"
+                return corners, conf, "docaligner"
             results.append((corners, conf, "docaligner"))
         except Exception as e:
             print(f"[docscan] DocAligner unavailable ({e}); trying other detectors")
@@ -94,7 +257,10 @@ def detect_corners(bgr):
         try:
             from docenh.geometry.ml_corners import find_document_corners_ml
             corners, conf = find_document_corners_ml(bgr, onnx_path=DOCUNET_ONNX)
-            if conf >= DETECT_MIN_CONFIDENCE:
+            corners = order_corners(np.asarray(corners, dtype=np.float32))
+            # Only take this shortcut when no larger multi-panel document was
+            # found; otherwise fall through so the two can be compared.
+            if conf >= DETECT_MIN_CONFIDENCE and panels_quad is None:
                 return corners, conf, "ml"
             results.append((corners, conf, "ml"))
         except Exception as e:
@@ -102,9 +268,22 @@ def detect_corners(bgr):
 
     from docenh.geometry.corners import find_document_corners
     corners, conf = find_document_corners(bgr)
+    corners = order_corners(np.asarray(corners, dtype=np.float32))
     results.append((corners, conf, "classical"))
 
-    # Nothing was confident — return whichever scored highest.
+    # A confident multi-panel result wins when the single-document detectors
+    # have clearly cropped part of the document away (the long-format Aadhaar
+    # letter: two panels with a cut line, where contour detectors keep one).
+    if (panels_quad is not None and panels_conf >= 0.6
+            and _is_multi_panel_shape(panels_quad)):
+        a_pn = abs(cv2.contourArea(panels_quad.astype(np.float32)))
+        others = [r for r in results if r[2] != "panels"]
+        if others:
+            a_best = max(abs(cv2.contourArea(np.asarray(r[0], np.float32)))
+                         for r in others)
+            if a_pn > a_best * 1.35:
+                return panels_quad, panels_conf, "panels"
+
     best = max(results, key=lambda r: r[1])
     return best[0], best[1], best[2]
 
