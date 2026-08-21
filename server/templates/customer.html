@@ -97,11 +97,25 @@
                     color: var(--brand-700); }
   .add-card .plus { font-size: 1.4rem; line-height: 1; color: var(--brand-500); }
 
-  /* uploaded PDF card */
-  .pdf-card { display: flex; align-items: center; gap: .8rem; padding: .9rem;
+  /* uploaded PDF cards */
+  .pdf-card { display: flex; align-items: flex-start; gap: .7rem; padding: .8rem;
               border: 1.5px solid var(--brand-500); border-radius: var(--r);
               background: var(--brand-50); }
-  .pdf-ico { font-size: 1.8rem; }
+  .pdf-card + .pdf-card { margin-top: .55rem; }
+  .pdf-ico { font-size: 1.5rem; line-height: 1.2; }
+  .pdf-body { flex: 1; min-width: 0; }
+  .pdf-name { font-weight: 650; font-size: .92rem; overflow: hidden;
+              text-overflow: ellipsis; white-space: nowrap; }
+  .pdf-range { display: flex; align-items: center; gap: .4rem; margin-top: .45rem;
+               flex-wrap: wrap; }
+  .pdf-range input { width: 130px; padding: .35rem .5rem; font-size: 15px; }
+  .pdf-range .chips { display: flex; gap: .25rem; }
+  .chip { border: 1px solid var(--line); background: var(--surface);
+          border-radius: 999px; padding: .12rem .55rem; font-size: .72rem;
+          font-weight: 600; color: var(--ink-2); cursor: pointer; }
+  .chip:hover { border-color: var(--brand-500); color: var(--brand-700); }
+  .pdf-err { color: var(--bad); font-size: .76rem; margin-top: .3rem; }
+  .pdf-ok { color: var(--muted); font-size: .76rem; margin-top: .3rem; }
 
   /* ---------- image editor ---------- */
   #edit-stage { position: relative; max-height: 52vh; overflow: hidden;
@@ -205,21 +219,15 @@
         📄 Upload a PDF</button>
     </div>
     <p class="muted tiny" style="margin:0;">Up to <strong>10 photos</strong>
-      (one page each) or a single PDF printed exactly as it is.</p>
+      (one page each), or <strong>PDFs</strong> printed exactly as they are —
+      you can choose which pages of each to print.</p>
   </div>
 
-  <!-- uploaded PDF -->
+  <!-- uploaded PDFs -->
   <div id="pdf-chosen" hidden>
-    <div class="pdf-card">
-      <span class="pdf-ico">📄</span>
-      <span style="flex:1; min-width:0;">
-        <strong id="pdf-name" style="display:block; overflow:hidden;
-                text-overflow:ellipsis; white-space:nowrap;"></strong>
-        <span class="muted tiny" id="pdf-meta">reading…</span>
-      </span>
-      <button type="button" class="btn btn-ghost btn-sm" id="pdf-preview-btn">Preview</button>
-      <button type="button" class="btn btn-ghost btn-sm" id="pdf-remove-btn">✕</button>
-    </div>
+    <div id="pdf-list"></div>
+    <button type="button" class="btn btn-ghost btn-sm" id="add-pdf-btn"
+            style="margin-top:.6rem;">＋ Add another PDF</button>
   </div>
 
   <!-- photo pages -->
@@ -328,7 +336,7 @@
 
 <input type="file" id="file-input" accept="image/*" hidden>
 <input type="file" id="photos-input" accept="image/*" multiple hidden>
-<input type="file" id="pdf-input" accept="application/pdf" hidden>
+<input type="file" id="pdf-input" accept="application/pdf" multiple hidden>
 {% endblock %}
 
 {% block scripts %}
@@ -337,7 +345,7 @@ const PRICES = { bw: {{ vendor.price_bw }}, color: {{ vendor.price_colour }} };
 const SHOP = "{{ vendor.shop_code }}";
 
 const state = { format: "aadhaar", layout: "side_by_side",
-                sides: { front: null, back: null }, pages: [], pdf: null };
+                sides: { front: null, back: null }, pages: [], pdfs: [] };
 const $ = (id) => document.getElementById(id);
 
 /* ---------------- format chooser ---------------- */
@@ -512,50 +520,138 @@ async function addPhotos(files) {
     state.pages.push({ blob, url: URL.createObjectURL(blob),
                        original: dataUrl, edited: false });
   }
-  state.pdf = null;
+  state.pdfs.forEach(e => URL.revokeObjectURL(e.url));
+  state.pdfs = [];
   renderDocPanel();
   updatePrice();
 }
 
+const MAX_PDFS = 5;
+
 $("pick-pdf-btn").addEventListener("click", () => $("pdf-input").click());
+$("add-pdf-btn").addEventListener("click", () => $("pdf-input").click());
+
 $("pdf-input").addEventListener("change", async () => {
-  const f = $("pdf-input").files[0];
+  const files = Array.from($("pdf-input").files || []);
   $("pdf-input").value = "";
-  if (!f) return;
-  if (f.size > 40 * 1024 * 1024) { alert("That PDF is larger than 40 MB."); return; }
-  state.pages = [];
-  state.pdf = { file: f, pages: null, url: URL.createObjectURL(f) };
-  renderDocPanel();
-  $("pdf-name").textContent = f.name;
-  $("pdf-meta").textContent = "counting pages...";
-  try {
-    const fd = new FormData();
-    fd.append("pdf", f, f.name);
-    const r = await fetch("/shop/" + SHOP + "/pdf-info", { method: "POST", body: fd });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || "unreadable");
-    state.pdf.pages = d.pages;
-    $("pdf-meta").textContent = d.pages + " page" + (d.pages > 1 ? "s" : "") +
-      " \u00b7 " + (f.size / 1048576).toFixed(1) + " MB";
-  } catch (e) {
-    $("pdf-meta").textContent = "Could not read this PDF \u2014 " + e.message;
-    state.pdf = null;
+  if (!files.length) return;
+  const room = MAX_PDFS - state.pdfs.length;
+  if (room <= 0) { alert("You can attach at most " + MAX_PDFS + " PDFs."); return; }
+  for (const f of files.slice(0, room)) {
+    if (f.size > 40 * 1024 * 1024) {
+      alert("'" + f.name + "' is larger than 40 MB."); continue;
+    }
+    state.pages = [];                       // PDFs and photos are exclusive
+    const entry = { file: f, name: f.name, size: f.size, pages: null,
+                    range: "all", selected: null, error: null,
+                    url: URL.createObjectURL(f) };
+    state.pdfs.push(entry);
+    renderDocPanel();
+    await refreshPdf(entry);
+  }
+  if (files.length > room) {
+    alert("Only " + room + " more PDF(s) could be added (limit " + MAX_PDFS + ").");
   }
   updatePrice();
 });
 
-$("pdf-remove-btn").addEventListener("click", () => {
-  state.pdf = null; renderDocPanel(); updatePrice();
-});
-$("pdf-preview-btn").addEventListener("click", () => {
-  if (state.pdf) window.open(state.pdf.url, "_blank");
-});
+// Ask the server for the page count and validate the chosen range.
+async function refreshPdf(entry) {
+  entry.error = null;
+  try {
+    const fd = new FormData();
+    fd.append("pdf", entry.file, entry.name);
+    fd.append("range", entry.range || "all");
+    const r = await fetch("/shop/" + SHOP + "/pdf-info", { method: "POST", body: fd });
+    const d = await r.json();
+    if (d.pages) entry.pages = d.pages;
+    if (!r.ok) { entry.error = d.error || "could not read this PDF";
+                 entry.selected = 0; }
+    else { entry.selected = d.selected; }
+  } catch (e) {
+    entry.error = "could not read this PDF";
+    entry.selected = 0;
+  }
+  renderPdfList();
+  updatePrice();
+}
+
+function renderPdfList() {
+  const wrap = $("pdf-list");
+  wrap.innerHTML = "";
+  state.pdfs.forEach((e, i) => {
+    const card = document.createElement("div");
+    card.className = "pdf-card";
+    const total = e.pages == null ? "…" : e.pages;
+    card.innerHTML =
+      '<span class="pdf-ico">\ud83d\udcc4</span>' +
+      '<div class="pdf-body">' +
+        '<div class="pdf-name"></div>' +
+        '<div class="muted tiny meta"></div>' +
+        '<div class="pdf-range">' +
+          '<label style="margin:0;font-size:.76rem;">Pages</label>' +
+          '<input type="text" class="range-in" inputmode="text" ' +
+                 'placeholder="all" value="' + (e.range === "all" ? "" : e.range) + '">' +
+          '<span class="chips">' +
+            '<button type="button" class="chip" data-set="all">All</button>' +
+            '<button type="button" class="chip" data-set="1">First</button>' +
+            (total !== "…" && e.pages > 1
+              ? '<button type="button" class="chip" data-set="' + e.pages + '">Last</button>'
+              : '') +
+          '</span>' +
+        '</div>' +
+        '<div class="msg"></div>' +
+      '</div>' +
+      '<button type="button" class="btn btn-ghost btn-sm prev-btn">Preview</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm del-btn">\u2715</button>';
+
+    card.querySelector(".pdf-name").textContent = e.name;
+    card.querySelector(".meta").textContent =
+      (e.pages == null ? "reading…"
+        : e.pages + " page" + (e.pages > 1 ? "s" : "")) +
+      " \u00b7 " + (e.size / 1048576).toFixed(1) + " MB";
+
+    const msg = card.querySelector(".msg");
+    if (e.error) { msg.className = "pdf-err"; msg.textContent = "⚠ " + e.error; }
+    else if (e.selected != null && e.pages != null) {
+      msg.className = "pdf-ok";
+      msg.textContent = e.selected === e.pages
+        ? "printing all " + e.pages + " page" + (e.pages > 1 ? "s" : "")
+        : "printing " + e.selected + " of " + e.pages + " pages";
+    } else { msg.className = "pdf-ok"; msg.textContent = ""; }
+
+    // range input (debounced revalidation)
+    const input = card.querySelector(".range-in");
+    let timer = null;
+    input.addEventListener("input", () => {
+      e.range = input.value.trim() || "all";
+      clearTimeout(timer);
+      timer = setTimeout(() => refreshPdf(e), 450);
+    });
+    card.querySelectorAll(".chip").forEach(ch =>
+      ch.addEventListener("click", () => {
+        e.range = ch.dataset.set;
+        refreshPdf(e);
+      }));
+
+    card.querySelector(".prev-btn").addEventListener("click",
+      () => window.open(e.url, "_blank"));
+    card.querySelector(".del-btn").addEventListener("click", () => {
+      URL.revokeObjectURL(e.url);
+      state.pdfs.splice(i, 1);
+      renderDocPanel(); updatePrice();
+    });
+    wrap.appendChild(card);
+  });
+  $("add-pdf-btn").hidden = state.pdfs.length >= MAX_PDFS;
+}
 
 function renderDocPanel() {
-  const hasPdf = !!state.pdf, hasPhotos = state.pages.length > 0;
+  const hasPdf = state.pdfs.length > 0, hasPhotos = state.pages.length > 0;
   $("doc-empty").hidden = hasPdf || hasPhotos;
   $("pdf-chosen").hidden = !hasPdf;
   $("photos-chosen").hidden = !hasPhotos;
+  if (hasPdf) renderPdfList();
   if (hasPhotos) renderDocPages();
 }
 
@@ -788,7 +884,11 @@ function pageCount() {
   if (state.format !== "document") {
     return (state.sides.front || state.sides.back) ? 1 : 0;
   }
-  if (state.pdf) return state.pdf.pages || 0;   // null while still counting
+  if (state.pdfs.length) {
+    // Sum the SELECTED pages; unknown/invalid entries count as 0 so the
+    // customer never sees a price we cannot honour.
+    return state.pdfs.reduce((n, e) => n + (e.error ? 0 : (e.selected || 0)), 0);
+  }
   return state.pages.length;
 }
 function updatePrice() {
@@ -797,10 +897,16 @@ function updatePrice() {
   const pages = pageCount();
   const total = PRICES[mode] * pages * copies;
   $("price").textContent = "₹" + total.toFixed(2);
+  const nPdf = state.pdfs.length;
+  const badPdf = state.pdfs.some(e => e.error);
   $("price-note").textContent = pages
-    ? `${state.pdf ? "PDF · " : ""}${pages} page${pages > 1 ? "s" : ""}` +
+    ? `${nPdf ? (nPdf > 1 ? nPdf + " PDFs · " : "PDF · ") : ""}` +
+      `${pages} page${pages > 1 ? "s" : ""}` +
       ` × ${copies} cop${copies > 1 ? "ies" : "y"}`
-    : (state.pdf ? "Reading the PDF…" : "Add a page to see the price");
+    : (badPdf ? "Fix the page range to continue"
+              : nPdf ? "Reading the PDF…" : "Add a page to see the price");
+  // Block ordering while any PDF has an invalid range.
+  if (badPdf) $("order-btn").disabled = true;
   $("order-btn").disabled = pages === 0;
   $("preview-btn").disabled = pages === 0;
 }
@@ -817,8 +923,11 @@ function buildForm() {
   fd.append("copies", $("copies").value || "1");
   fd.append("customer_phone", $("customer-phone").value || "");
   if (state.format === "document") {
-    if (state.pdf) {
-      fd.append("pdf", state.pdf.file, state.pdf.file.name);
+    if (state.pdfs.length) {
+      state.pdfs.forEach((e, i) => {
+        fd.append("pdf", e.file, e.name);
+        fd.append("range_" + i, e.range || "all");
+      });
     } else {
       state.pages.forEach((p, i) => fd.append("pages", p.blob, `page${i + 1}.jpg`));
     }

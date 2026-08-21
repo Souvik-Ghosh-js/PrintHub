@@ -289,7 +289,9 @@ def build_document_pdf(files, enhance_mode):
 
 
 MAX_IMAGE_PAGES = 10          # customer may attach up to 10 photos
-MAX_PDF_PAGES = 100           # sanity cap for an uploaded PDF
+MAX_PDF_PAGES = 100           # sanity cap per uploaded PDF
+MAX_PDFS = 5                  # how many PDFs one order may contain
+MAX_TOTAL_PAGES = 200         # total printed pages in a single order
 
 
 def _pdf_page_count(data: bytes) -> int:
@@ -304,6 +306,122 @@ def _pdf_page_count(data: bytes) -> int:
         raise
     except Exception as e:
         raise ValueError(f"could not read the PDF ({e})")
+
+
+def parse_page_range(spec: str, total: int):
+    """Turn a human page range into a sorted list of 1-based page numbers.
+
+    Accepts "all"/"" (everything), "5", "3-5", "1,4,7-9". Raises ValueError
+    with a readable message for anything out of range or malformed, so the
+    customer is told exactly what is wrong before they pay.
+    """
+    spec = (spec or "").strip().lower()
+    if spec in ("", "all"):
+        return list(range(1, total + 1))
+
+    pages = []
+    for part in spec.replace(" ", "").split(","):
+        if not part:
+            continue
+        if "-" in part:
+            bits = part.split("-")
+            if len(bits) != 2 or not all(b.isdigit() for b in bits):
+                raise ValueError(f"'{part}' is not a valid page range")
+            a, b = int(bits[0]), int(bits[1])
+            if a < 1 or b < 1:
+                raise ValueError("page numbers start at 1")
+            if a > b:
+                raise ValueError(f"'{part}': the first page must not be "
+                                 f"after the last")
+            if b > total:
+                raise ValueError(f"'{part}': this PDF only has {total} pages")
+            pages.extend(range(a, b + 1))
+        else:
+            if not part.isdigit():
+                raise ValueError(f"'{part}' is not a page number")
+            n = int(part)
+            if n < 1:
+                raise ValueError("page numbers start at 1")
+            if n > total:
+                raise ValueError(f"page {n}: this PDF only has {total} pages")
+            pages.append(n)
+
+    pages = sorted(set(pages))
+    if not pages:
+        raise ValueError("no pages selected")
+    return pages
+
+
+def extract_pdf_pages(data: bytes, pages):
+    """Return a new PDF containing only `pages` (1-based), in order."""
+    import fitz
+    src = fitz.open(stream=data, filetype="pdf")
+    try:
+        out = fitz.open()
+        try:
+            for n in pages:
+                out.insert_pdf(src, from_page=n - 1, to_page=n - 1)
+            return out.tobytes()
+        finally:
+            out.close()
+    finally:
+        src.close()
+
+
+def merge_pdfs(parts):
+    """Concatenate several PDFs (bytes) into one, in the given order."""
+    if len(parts) == 1:
+        return parts[0]
+    import fitz
+    out = fitz.open()
+    try:
+        for data in parts:
+            src = fitz.open(stream=data, filetype="pdf")
+            try:
+                out.insert_pdf(src)
+            finally:
+                src.close()
+        return out.tobytes()
+    finally:
+        out.close()
+
+
+def _collect_pdfs():
+    """Read the uploaded PDFs and their per-file page ranges.
+
+    Fields: pdf (repeated) and range_0, range_1, ... matching by index.
+    Returns (merged_pdf_bytes, total_pages).
+    """
+    files = request.files.getlist("pdf")
+    if not files:
+        return None, 0
+    if len(files) > MAX_PDFS:
+        raise ValueError(f"you can attach at most {MAX_PDFS} PDFs")
+
+    parts, total = [], 0
+    for i, f in enumerate(files):
+        data = f.read()
+        if not data[:5].startswith(b"%PDF"):
+            raise ValueError(f"'{f.filename}' is not a valid PDF")
+        count = _pdf_page_count(data)
+        if count < 1:
+            raise ValueError(f"'{f.filename}' has no pages")
+        if count > MAX_PDF_PAGES:
+            raise ValueError(f"'{f.filename}' has {count} pages; the limit "
+                             f"is {MAX_PDF_PAGES}")
+        spec = request.form.get(f"range_{i}", "all")
+        try:
+            wanted = parse_page_range(spec, count)
+        except ValueError as e:
+            raise ValueError(f"'{f.filename}': {e}")
+        parts.append(extract_pdf_pages(data, wanted)
+                     if len(wanted) != count else data)
+        total += len(wanted)
+
+    if total > MAX_TOTAL_PAGES:
+        raise ValueError(f"that is {total} pages; a single order is limited "
+                         f"to {MAX_TOTAL_PAGES}")
+    return merge_pdfs(parts), total
 
 
 def _order_pdf_from_request(doc_format):
@@ -326,18 +444,12 @@ def _order_pdf_from_request(doc_format):
         layout = config.DOC_FORMATS[doc_format]["layout"]
         return compose_id_pdf(sides, layout, enhance_mode), 1
 
-    # A PDF the customer uploaded: print it exactly as supplied.
-    pdf = request.files.get("pdf")
-    if pdf:
-        data = pdf.read()
-        if not data[:5].startswith(b"%PDF"):
-            raise ValueError("that file is not a valid PDF")
-        pages = _pdf_page_count(data)
-        if pages < 1:
-            raise ValueError("that PDF has no pages")
-        if pages > MAX_PDF_PAGES:
-            raise ValueError(f"PDFs are limited to {MAX_PDF_PAGES} pages")
-        return data, pages
+    # PDFs the customer uploaded: printed as supplied, honouring the page
+    # range chosen for each one, merged into a single print job.
+    if request.files.getlist("pdf"):
+        merged, pages = _collect_pdfs()
+        if merged:
+            return merged, pages
 
     # Photos -> one A4 page each.
     files = request.files.getlist("pages")
@@ -368,7 +480,14 @@ def shop_pdf_info(code):
         return jsonify({"error": str(e)}), 400
     if pages > MAX_PDF_PAGES:
         return jsonify({"error": f"PDFs are limited to {MAX_PDF_PAGES} pages"}), 400
-    return jsonify({"pages": pages})
+    # Validate a page range in the same request when one is supplied, so the
+    # customer sees the selected count (and any mistake) immediately.
+    spec = request.form.get("range", "all")
+    try:
+        selected = len(parse_page_range(spec, pages))
+    except ValueError as e:
+        return jsonify({"pages": pages, "error": str(e)}), 400
+    return jsonify({"pages": pages, "selected": selected})
 
 
 @app.route("/shop/<code>/preview", methods=["POST"])
