@@ -349,7 +349,6 @@
     <div class="edit-tools">
       <button type="button" class="btn btn-ghost btn-sm" id="e-crop">⬚ Crop</button>
       <button type="button" class="btn btn-ghost btn-sm" id="e-persp">⟡ Perspective</button>
-      <button type="button" class="btn btn-ghost btn-sm" id="e-autocut">✂ Auto-cut</button>
       <button type="button" class="btn btn-ghost btn-sm" id="e-rotl">⟲</button>
       <button type="button" class="btn btn-ghost btn-sm" id="e-rotr">⟳</button>
       <button type="button" class="btn btn-ghost btn-sm" id="e-reset">Reset</button>
@@ -948,38 +947,6 @@ async function rotate(deg) {
 $("e-rotl").addEventListener("click", () => rotate(-90));
 $("e-rotr").addEventListener("click", () => rotate(90));
 
-// Auto-cut: detect the document edges and flatten it in one step
-// (this is the scanner-style correction; the sliders are the manual one).
-$("e-autocut").addEventListener("click", async () => {
-  const btn = $("e-autocut"); btn.disabled = true;
-  $("edit-hint").textContent = "Finding the document...";
-  try {
-    const blob = await (await fetch(EDIT.working)).blob();
-    const fd = new FormData();
-    fd.append("file", blob, "page.jpg");
-    const d = await (await fetch("/api/detect_document",
-                                 { method: "POST", body: fd })).json();
-    if (!(d.ok && Array.isArray(d.corners))) {
-      $("edit-hint").textContent =
-        "Could not find the page edges \u2014 use Crop or the sliders.";
-      return;
-    }
-    const wf = new FormData();
-    wf.append("file", blob, "page.jpg");
-    wf.append("corners", JSON.stringify(d.corners));
-    const r = await fetch("/api/warp_page", { method: "POST", body: wf });
-    if (!r.ok) throw new Error("could not straighten");
-    const out = await r.blob();
-    EDIT.working = URL.createObjectURL(out);
-    EDIT.img = await loadImage(EDIT.working);
-    EDIT.tilt = { h: 0, v: 0, rot: 0, zoom: 1 };
-    syncTiltInputs();
-    setMode("crop");
-    $("edit-hint").textContent = "Page detected and straightened. Apply to keep it.";
-  } catch (e) {
-    $("edit-hint").textContent = "Auto-cut unavailable \u2014 adjust by hand.";
-  } finally { btn.disabled = false; }
-});
 
 $("edit-cancel").addEventListener("click", () => {
   EDIT.canvas.style.transform = "none";
