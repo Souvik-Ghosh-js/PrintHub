@@ -29,6 +29,11 @@ DETECT_MIN_CONFIDENCE = 0.30
 # reliability signal. Below this we prefer another detector.
 DOCALIGNER_MIN_PEAK = 0.35
 
+# The legacy docunet model is kept only as a last-resort candidate: its
+# confidence is poorly calibrated (it reports ~0.5 while cropping well inside
+# the document), so discount it when comparing against other detectors.
+DOCUNET_TRUST = 0.55
+
 _DA_SESSION = None
 
 
@@ -286,11 +291,12 @@ def detect_corners(bgr):
             from docenh.geometry.ml_corners import find_document_corners_ml
             corners, conf = find_document_corners_ml(bgr, onnx_path=DOCUNET_ONNX)
             corners = order_corners(np.asarray(corners, dtype=np.float32))
-            # Only take this shortcut when no larger multi-panel document was
-            # found; otherwise fall through so the two can be compared.
-            if conf >= DETECT_MIN_CONFIDENCE and panels_quad is None:
-                return expand_quad(corners, ish), conf, "ml"
-            results.append((corners, conf, "ml"))
+            # NEVER return early here. This is the weakest detector we have;
+            # on wide multi-panel documents it reports ~0.5 confidence while
+            # cropping deep inside the paper, which used to beat a classical
+            # result that was correct at 0.99. Always let the comparison at
+            # the end pick the winner.
+            results.append((corners, conf * DOCUNET_TRUST, "ml"))
         except Exception as e:
             print(f"[docscan] docunet unavailable ({e}); falling back to classical CV")
 
