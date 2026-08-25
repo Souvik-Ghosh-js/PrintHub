@@ -344,7 +344,7 @@
     </div>
 
     <div class="edit-tools">
-      <button type="button" class="btn btn-ghost btn-sm" id="e-crop">⬚ Crop</button>
+      <button type="button" class="btn btn-ghost btn-sm" id="e-crop">⬚ Corners</button>
       <button type="button" class="btn btn-ghost btn-sm" id="e-persp">⟡ Perspective</button>
       <button type="button" class="btn btn-ghost btn-sm" id="e-rotl">⟲</button>
       <button type="button" class="btn btn-ghost btn-sm" id="e-rotr">⟳</button>
@@ -353,6 +353,35 @@
     <div class="btn-row" style="justify-content:flex-end;">
       <button type="button" class="btn btn-ghost" id="edit-cancel">Cancel</button>
       <button type="button" class="btn btn-primary" id="edit-apply">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- document preview, with Pay & Print in the same place -->
+<div class="modal" id="preview-modal">
+  <div class="modal-box" style="max-width:760px; display:flex; flex-direction:column;">
+    <div class="row-between" style="margin-bottom:.6rem;">
+      <h2 style="margin:0;">Preview</h2>
+      <span class="muted tiny" id="preview-meta"></span>
+    </div>
+    <div id="preview-frame-wrap"
+         style="flex:1; min-height:48vh; background:var(--surface-2);
+                border:1px solid var(--line); border-radius:var(--r-sm);
+                overflow:hidden;">
+      <iframe id="preview-frame" title="Document preview"
+              style="width:100%; height:52vh; border:0; display:block;"></iframe>
+    </div>
+    <p class="muted tiny" style="margin:.6rem 0 0;">
+      This is exactly what will be printed, at the size it will print.</p>
+    <div class="row-between" style="margin-top:.9rem; gap:.6rem; flex-wrap:wrap;">
+      <div>
+        <div class="muted tiny" id="preview-note"></div>
+        <div class="total-amt" id="preview-price">₹0.00</div>
+      </div>
+      <div class="btn-row" style="flex-wrap:nowrap;">
+        <button type="button" class="btn btn-ghost" id="preview-close">Back to edit</button>
+        <button type="button" class="btn btn-success btn-lg" id="preview-pay">Pay &amp; Print</button>
+      </div>
     </div>
   </div>
 </div>
@@ -770,7 +799,8 @@ async function autoPlaceCrop() {
       EDIT.pts = d.corners.map(c => [c[0] * EDIT.scale, c[1] * EDIT.scale]);
       drawEditor();
       $("edit-hint").textContent =
-        "\u2728 Edges found \u2014 drag the corners to adjust, then Apply.";
+        "\u2728 Edges found \u2014 drag any corner to correct the perspective, "
+        + "then Apply.";
     } else {
       $("edit-hint").textContent =
         "Drag the corners to frame your document, then Apply.";
@@ -795,10 +825,11 @@ function setMode(mode) {
 
   const isTilt = mode === "perspective";
   $("tilt-panel").classList.toggle("on", isTilt);
-  $("edit-mode-label").textContent = isTilt ? "Perspective" : "Crop";
+  $("edit-mode-label").textContent = isTilt ? "Tilt" : "Corners / perspective";
   $("edit-hint").textContent = isTilt
     ? "Tilt the photo until the page looks square-on. Zoom hides the edges."
-    : "Drag the corners to crop. Everything inside is kept.";
+    : "Drag each corner onto a corner of the document \u2014 it is cropped "
+      + "and straightened to exactly that shape.";
   ["e-crop", "e-persp"].forEach(id => $(id).classList.remove("btn-primary"));
   $(isTilt ? "e-persp" : "e-crop").classList.add("btn-primary");
   drawEditor();
@@ -971,16 +1002,22 @@ $("edit-apply").addEventListener("click", async () => {
         outBlob = await r.blob();
       }
     } else {
+      // Crop mode keeps the FOUR corners: the handles form a quadrilateral
+      // (the AI's detected document is rarely a perfect rectangle), so we
+      // perspective-correct to exactly that shape. A bounding-box crop would
+      // include background on a tilted document and lose its corners, which
+      // is why Preview used to differ from what was shown here.
       const xs = pts.map(pt => pt[0]), ys = pts.map(pt => pt[1]);
-      const x0 = Math.max(0, Math.min.apply(null, xs));
-      const y0 = Math.max(0, Math.min.apply(null, ys));
-      const w = Math.min(EDIT.img.width - x0, Math.max.apply(null, xs) - x0);
-      const h = Math.min(EDIT.img.height - y0, Math.max.apply(null, ys) - y0);
-      if (w < 10 || h < 10) throw new Error("that crop is too small");
-      const c = document.createElement("canvas");
-      c.width = Math.round(w); c.height = Math.round(h);
-      c.getContext("2d").drawImage(EDIT.img, x0, y0, w, h, 0, 0, c.width, c.height);
-      outBlob = await new Promise(res => c.toBlob(res, "image/jpeg", 0.92));
+      const bw = Math.max.apply(null, xs) - Math.min.apply(null, xs);
+      const bh = Math.max.apply(null, ys) - Math.min.apply(null, ys);
+      if (bw < 10 || bh < 10) throw new Error("that crop is too small");
+      const src = await (await fetch(EDIT.working)).blob();
+      const fd = new FormData();
+      fd.append("file", src, "page.jpg");
+      fd.append("corners", JSON.stringify(pts));
+      const r = await fetch("/api/warp_page", { method: "POST", body: fd });
+      if (!r.ok) throw new Error("could not apply the crop");
+      outBlob = await r.blob();
     }
     URL.revokeObjectURL(page.url);
     page.blob = outBlob;
@@ -990,6 +1027,7 @@ $("edit-apply").addEventListener("click", async () => {
     $("edit-modal").classList.remove("open");
     if (EDIT.target.kind === "page") renderDocPages();
     else { renderSlot("front"); renderSlot("back"); }
+    invalidatePreview();
   } catch (e) {
     alert("Could not apply the change: " + e.message);
   } finally { btn.disabled = false; btn.textContent = "Apply"; }
@@ -1028,6 +1066,15 @@ function updatePrice() {
 }
 $("color-mode").addEventListener("change", updatePrice);
 $("copies").addEventListener("input", updatePrice);
+
+// A stale preview must never be shown after the pages change.
+function invalidatePreview() {
+  if ($("preview-modal").classList.contains("open")) {
+    $("preview-modal").classList.remove("open");
+  }
+  if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
+  $("preview-frame").removeAttribute("src");
+}
 updatePrice();
 
 /* ---------------- submit + pay ---------------- */
@@ -1054,16 +1101,36 @@ function buildForm() {
   return fd;
 }
 
+let previewUrl = null;
+
 $("preview-btn").addEventListener("click", async () => {
   const btn = $("preview-btn"), label = btn.textContent;
   btn.disabled = true; btn.textContent = "Building…";
   try {
     const r = await fetch(`/shop/${SHOP}/preview`, { method: "POST", body: buildForm() });
     if (!r.ok) throw new Error("preview failed");
-    window.open(URL.createObjectURL(await r.blob()), "_blank");
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = URL.createObjectURL(await r.blob());
+    $("preview-frame").src = previewUrl;
+    const pages = r.headers.get("X-Total-Pages") || pageCount();
+    $("preview-meta").textContent =
+      pages + " page" + (pages == 1 ? "" : "s") + " ready to print";
+    $("preview-note").textContent = $("price-note").textContent;
+    $("preview-price").textContent = $("price").textContent;
+    $("preview-modal").classList.add("open");
   } catch (e) {
     alert("Could not build the preview. Please try again.");
   } finally { btn.disabled = false; btn.textContent = label; updatePrice(); }
+});
+
+$("preview-close").addEventListener("click", () => {
+  $("preview-modal").classList.remove("open");
+});
+
+// Pay straight from the preview — no going back to the previous screen.
+$("preview-pay").addEventListener("click", () => {
+  $("preview-modal").classList.remove("open");
+  $("order-btn").click();
 });
 
 const payModal = $("pay-modal"), payState = $("pay-state"), payClose = $("pay-close");

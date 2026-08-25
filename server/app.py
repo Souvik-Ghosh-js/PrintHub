@@ -248,9 +248,30 @@ def tilt_page():
 
 
 # --- ID-card compose (ported from the prototype, extended for single page) ---
+# An ID-1 card (Aadhaar/PAN/Voter plastic card) is 85.6 x 54 mm. Anything
+# whose aspect ratio is close to that is printed at true card size; anything
+# else (the long-format Aadhaar letter, a photocopy, an A4 page) keeps its own
+# proportions and is printed as large as the sheet allows. Forcing everything
+# to card size is what made a full letter print out PAN-card sized.
+CARD_ASPECT = 85.6 / 54.0          # 1.585
+# Tight tolerance on purpose: A4 is 1.414 and a photocopy of a page must NOT
+# be mistaken for a card and shrunk to 86x54 mm. 8% keeps real ID cards
+# (1.55-1.62 once cropped) in while leaving A4 and letters out.
+CARD_ASPECT_TOL = 0.08
+
+
+def _looks_like_card(img_w, img_h):
+    ar = max(img_w, img_h) / max(1.0, min(img_w, img_h))
+    return abs(ar - CARD_ASPECT) / CARD_ASPECT <= CARD_ASPECT_TOL
+
+
 def compose_id_pdf(sides, layout, enhance_mode):
-    """Compose 1 or 2 card sides on one A4 portrait page at REAL card size
-    (ISO ID-1: 85.6mm x 54mm).
+    """Compose 1 or 2 document sides on one A4 portrait page.
+
+    A real ID-1 card is placed at its true physical size (85.6 x 54 mm) so it
+    prints life-size. A document with any other shape — the long-format
+    Aadhaar letter, a photocopy, a page — keeps its own aspect ratio and is
+    scaled to fill the sheet instead of being squashed into a card.
 
     sides: list of raw image bytes (already cropped client-side), 1 or 2 items.
     layout: 'side_by_side' | 'stacked'. A single side is centred (spec §2).
@@ -259,35 +280,59 @@ def compose_id_pdf(sides, layout, enhance_mode):
     DPI = 300
     A4_W, A4_H = int(8.27 * DPI), int(11.69 * DPI)
     GAP = int(0.3 * DPI)
+    MARGIN = int(0.35 * DPI)
     MM = DPI / 25.4
     CARD_W, CARD_H = int(85.6 * MM), int(54.0 * MM)
 
-    cards = []
+    raw = []
     for data in sides:
         bgr = docscan.decode_image(data)
         if bgr is None:
             raise ValueError("could not decode a page image")
         bgr = docscan.enhance_image(bgr, enhance_mode)
-        rgb = bgr[:, :, ::-1]  # BGR -> RGB for PIL
-        img = Image.fromarray(rgb).resize((CARD_W, CARD_H), Image.LANCZOS)
-        cards.append(img)
+        raw.append(Image.fromarray(bgr[:, :, ::-1]))     # BGR -> RGB
+
+    n = len(raw)
+    all_cards = all(_looks_like_card(im.width, im.height) for im in raw)
+
+    if all_cards:
+        # life-size ID cards, in the requested layout
+        cards = [im.resize((CARD_W, CARD_H), Image.LANCZOS) for im in raw]
+    else:
+        # keep each image's own proportions; fit the available area
+        if n == 1:
+            avail_w, avail_h = A4_W - 2 * MARGIN, A4_H - 2 * MARGIN
+        elif layout == "side_by_side":
+            avail_w = (A4_W - 2 * MARGIN - GAP) // 2
+            avail_h = A4_H - 2 * MARGIN
+        else:
+            avail_w = A4_W - 2 * MARGIN
+            avail_h = (A4_H - 2 * MARGIN - GAP) // 2
+        cards = []
+        for im in raw:
+            # A wide document on a portrait sheet prints larger rotated 90.
+            if n == 1 and im.width > im.height and avail_h > avail_w:
+                im = im.rotate(90, expand=True)
+            k = min(avail_w / im.width, avail_h / im.height)
+            cards.append(im.resize((max(1, int(im.width * k)),
+                                    max(1, int(im.height * k))), Image.LANCZOS))
 
     canvas = Image.new("RGB", (A4_W, A4_H), "white")
     if len(cards) == 1:
-        # Auto-centre on single upload (spec §2).
-        canvas.paste(cards[0], ((A4_W - CARD_W) // 2, (A4_H - CARD_H) // 2))
+        c = cards[0]
+        canvas.paste(c, ((A4_W - c.width) // 2, (A4_H - c.height) // 2))
     elif layout == "side_by_side":
-        total_w = CARD_W * 2 + GAP
+        total_w = cards[0].width + GAP + cards[1].width
         x = (A4_W - total_w) // 2
-        y = (A4_H - CARD_H) // 2
-        canvas.paste(cards[0], (x, y))
-        canvas.paste(cards[1], (x + CARD_W + GAP, y))
-    else:  # stacked (PAN)
-        total_h = CARD_H * 2 + GAP
-        x = (A4_W - CARD_W) // 2
+        for c in cards:
+            canvas.paste(c, (x, (A4_H - c.height) // 2))
+            x += c.width + GAP
+    else:  # stacked
+        total_h = cards[0].height + GAP + cards[1].height
         y = (A4_H - total_h) // 2
-        canvas.paste(cards[0], (x, y))
-        canvas.paste(cards[1], (x, y + CARD_H + GAP))
+        for c in cards:
+            canvas.paste(c, ((A4_W - c.width) // 2, y))
+            y += c.height + GAP
 
     out = io.BytesIO()
     canvas.save(out, format="PDF", resolution=DPI)
