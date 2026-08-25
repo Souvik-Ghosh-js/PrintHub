@@ -72,6 +72,33 @@ def find_corners_docaligner(bgr):
     return np.asarray(pts, dtype=np.float32), float(np.min(peaks))
 
 
+def expand_quad(quad, image_shape, frac=0.012, min_px=4):
+    """Nudge a detected quad outwards from its own centre.
+
+    Every detector we use errs INWARD: contour fitting sits on the inside of
+    the edge, segmentation masks shrink under morphology, and a laminated
+    card's bright rim gets classified as background. On a document that fills
+    the frame this shows up as a crop that shaves the border off all four
+    sides. Losing a few pixels of background is harmless; losing part of the
+    document is not, so bias outward by a small fraction of the document's
+    own size and clamp to the image.
+    """
+    q = np.asarray(quad, dtype=np.float32).reshape(4, 2)
+    centre = q.mean(axis=0)
+    vecs = q - centre
+    size = float(np.mean(np.linalg.norm(vecs, axis=1)))
+    if size < 1e-6:
+        return q
+    grow = max(float(min_px), size * float(frac))
+    norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+    norms[norms < 1e-6] = 1.0
+    out = q + (vecs / norms) * grow
+    h, w = image_shape[:2]
+    out[:, 0] = np.clip(out[:, 0], 0, w - 1)
+    out[:, 1] = np.clip(out[:, 1], 0, h - 1)
+    return out.astype(np.float32)
+
+
 def _is_multi_panel_shape(quad, min_aspect=1.95):
     """A folded multi-panel document is markedly wider (or taller) than a
     single ID card, which is about 1.6:1. Used to avoid overriding a good
@@ -223,6 +250,7 @@ def detect_corners(bgr):
     (corners (4,2), confidence, detector-name).
     """
     results = []
+    ish = bgr.shape
 
     # Multi-panel documents (the old long-format Aadhaar letter is two panels
     # side by side) must be handled before the single-card detectors, which
@@ -247,8 +275,8 @@ def detect_corners(bgr):
                     a_da = abs(cv2.contourArea(corners.astype(np.float32)))
                     a_pn = abs(cv2.contourArea(panels_quad.astype(np.float32)))
                     if a_pn > a_da * 1.35 and _is_multi_panel_shape(panels_quad):
-                        return panels_quad, panels_conf, "panels"
-                return corners, conf, "docaligner"
+                        return expand_quad(panels_quad, ish), panels_conf, "panels"
+                return expand_quad(corners, ish), conf, "docaligner"
             results.append((corners, conf, "docaligner"))
         except Exception as e:
             print(f"[docscan] DocAligner unavailable ({e}); trying other detectors")
@@ -261,7 +289,7 @@ def detect_corners(bgr):
             # Only take this shortcut when no larger multi-panel document was
             # found; otherwise fall through so the two can be compared.
             if conf >= DETECT_MIN_CONFIDENCE and panels_quad is None:
-                return corners, conf, "ml"
+                return expand_quad(corners, ish), conf, "ml"
             results.append((corners, conf, "ml"))
         except Exception as e:
             print(f"[docscan] docunet unavailable ({e}); falling back to classical CV")
@@ -282,10 +310,10 @@ def detect_corners(bgr):
             a_best = max(abs(cv2.contourArea(np.asarray(r[0], np.float32)))
                          for r in others)
             if a_pn > a_best * 1.35:
-                return panels_quad, panels_conf, "panels"
+                return expand_quad(panels_quad, ish), panels_conf, "panels"
 
     best = max(results, key=lambda r: r[1])
-    return best[0], best[1], best[2]
+    return expand_quad(best[0], ish), best[1], best[2]
 
 
 def decode_image(data: bytes):
