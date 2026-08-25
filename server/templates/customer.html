@@ -3,8 +3,6 @@
 {% block wrapclass %}wrap-narrow{% endblock %}
 
 {% block head %}
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"></script>
 <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
 <style>
   /* ---------- shop header ---------- */
@@ -176,10 +174,6 @@
     .total-amt { font-size: 1.3rem; }
   }
 
-  /* ---------- crop modal ---------- */
-  #crop-stage { max-height: 54vh; background: var(--surface-2);
-                border-radius: var(--r-sm); overflow: hidden; }
-  #crop-img { max-width: 100%; display: block; }
   .detect-note { font-size: .8rem; color: var(--muted); min-height: 1.2em;
                  margin: .6rem 0; display: flex; align-items: center; gap: .4rem; }
 
@@ -363,19 +357,6 @@
   </div>
 </div>
 
-<!-- crop editor -->
-<div class="modal" id="crop-modal">
-  <div class="modal-box">
-    <h2>Adjust the crop</h2>
-    <div id="crop-stage"><img id="crop-img" alt=""></div>
-    <div class="detect-note" id="crop-detect-note"></div>
-    <div class="btn-row" style="justify-content:flex-end;">
-      <button type="button" class="btn btn-ghost" id="crop-cancel">Cancel</button>
-      <button type="button" class="btn btn-primary" id="crop-done">Use this crop</button>
-    </div>
-  </div>
-</div>
-
 <!-- payment status -->
 <div class="modal" id="pay-modal">
   <div class="modal-box" style="max-width:420px;">
@@ -423,11 +404,8 @@ fmtBtns.forEach(btn => btn.addEventListener("click", () => {
 }));
 fmtBtns[0].click();
 
-/* ---------------- crop editor + AI auto-cut ---------------- */
-let cropper = null, cropCallback = null;
-const cropModal = $("crop-modal"), cropImg = $("crop-img"), detectNote = $("crop-detect-note");
+/* ---------------- image helpers ---------------- */
 const MAX_DIM = 1400;
-
 function downscale(dataUrl) {
   return new Promise(resolve => {
     const img = new Image();
@@ -445,75 +423,34 @@ function downscale(dataUrl) {
   });
 }
 
-async function autoDetect(dataUrl) {
-  try {
-    const blob = await (await fetch(dataUrl)).blob();
-    const fd = new FormData();
-    fd.append("file", blob, "page.jpg");
-    const d = await (await fetch("/api/detect_document", { method: "POST", body: fd })).json();
-    if (d.ok && Array.isArray(d.corners)) {
-      const xs = d.corners.map(c => c[0]), ys = d.corners.map(c => c[1]);
-      const x = Math.max(0, Math.min(...xs)), y = Math.max(0, Math.min(...ys));
-      cropper.setData({ x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y });
-      detectNote.innerHTML = "✨ Edges detected automatically — drag to fine-tune.";
-    } else {
-      detectNote.textContent = "Drag the handles to frame your document.";
-    }
-  } catch (e) {
-    detectNote.textContent = "Drag the handles to frame your document.";
-  }
-}
-
-function openCropper(file, cb) {
-  cropCallback = cb;
-  const reader = new FileReader();
-  reader.onload = async (e) => {
-    const dataUrl = await downscale(e.target.result);
-    cropImg.src = dataUrl;
-    cropModal.classList.add("open");
-    detectNote.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;margin:0;"></span> Detecting edges…';
-    if (cropper) cropper.destroy();
-    cropper = new Cropper(cropImg, {
-      viewMode: 0, autoCropArea: 0.8, background: false,
-      movable: true, zoomable: false, rotatable: true,
-      ready() { autoDetect(dataUrl); },
-    });
-  };
-  reader.readAsDataURL(file);
-}
-
-$("crop-cancel").addEventListener("click", () => {
-  cropModal.classList.remove("open");
-  if (cropper) { cropper.destroy(); cropper = null; }
-});
-$("crop-done").addEventListener("click", () => {
-  if (!cropper) return;
-  cropper.getCroppedCanvas({ maxWidth: 1400, maxHeight: 1400, imageSmoothingQuality: "high" })
-    .toBlob(blob => {
-      cropModal.classList.remove("open");
-      cropper.destroy(); cropper = null;
-      if (blob && cropCallback) cropCallback({ blob, url: URL.createObjectURL(blob) });
-    }, "image/jpeg", 0.92);
-});
-
 /* ---------------- page slots ---------------- */
 const fileInput = $("file-input");
 let pendingTarget = null;
 
 function pickFile(target) { pendingTarget = target; fileInput.value = ""; fileInput.click(); }
 
-fileInput.addEventListener("change", () => {
+fileInput.addEventListener("change", async () => {
   const f = fileInput.files[0];
   if (!f) return;
-  openCropper(f, (page) => {
-    if (pendingTarget === "newpage") { state.pages.push(page); renderDocPanel(); }
-    else {
-      page.original = page.original || page.url;
-      state.sides[pendingTarget] = page;
-      renderSlot("front"); renderSlot("back");
-    }
-    updatePrice();
-  });
+  // One step: downscale, add the page, then open the editor with the AI's
+  // edge detection already applied. The customer lands on the crop they
+  // will actually get and can adjust it right there.
+  const dataUrl = await downscale(await blobToDataURL(f));
+  const blob = await (await fetch(dataUrl)).blob();
+  const page = { blob, url: URL.createObjectURL(blob),
+                 original: dataUrl, edited: false };
+  let target;
+  if (pendingTarget === "newpage") {
+    state.pages.push(page);
+    renderDocPanel();
+    target = { kind: "page", idx: state.pages.length - 1 };
+  } else {
+    state.sides[pendingTarget] = page;
+    renderSlot("front"); renderSlot("back");
+    target = { kind: "side", side: pendingTarget };
+  }
+  updatePrice();
+  openEditor(target, { autodetect: true, fresh: true });
 });
 
 function renderSlot(side) {
@@ -793,9 +730,11 @@ function loadImage(src) {
   });
 }
 
-async function openEditor(target) {
+async function openEditor(target, opts) {
   if (typeof target === "number") target = { kind: "page", idx: target };
+  opts = opts || {};
   EDIT.target = target;
+  EDIT.fresh = !!opts.fresh;
   const page = editTargetPage();
   if (!page) return;
   EDIT.working = page.url;
@@ -809,6 +748,37 @@ async function openEditor(target) {
     : "Edit " + target.side + " side";
   setMode("crop");
   $("edit-modal").classList.add("open");
+
+  if (opts.autodetect) {
+    $("edit-hint").innerHTML =
+      '<span class="spinner" style="width:13px;height:13px;border-width:2px;' +
+      'margin:0;display:inline-block;vertical-align:-2px;"></span> ' +
+      'Finding the document\u2026';
+    await autoPlaceCrop();
+  }
+}
+
+/* Ask the server where the document is and put the crop handles there. */
+async function autoPlaceCrop() {
+  try {
+    const blob = await (await fetch(EDIT.working)).blob();
+    const fd = new FormData();
+    fd.append("file", blob, "page.jpg");
+    const d = await (await fetch("/api/detect_document",
+                                 { method: "POST", body: fd })).json();
+    if (d.ok && Array.isArray(d.corners)) {
+      EDIT.pts = d.corners.map(c => [c[0] * EDIT.scale, c[1] * EDIT.scale]);
+      drawEditor();
+      $("edit-hint").textContent =
+        "\u2728 Edges found \u2014 drag the corners to adjust, then Apply.";
+    } else {
+      $("edit-hint").textContent =
+        "Drag the corners to frame your document, then Apply.";
+    }
+  } catch (e) {
+    $("edit-hint").textContent =
+      "Drag the corners to frame your document, then Apply.";
+  }
 }
 
 function setMode(mode) {
@@ -969,6 +939,13 @@ $("e-rotr").addEventListener("click", () => rotate(90));
 $("edit-cancel").addEventListener("click", () => {
   EDIT.canvas.style.transform = "none";
   $("edit-modal").classList.remove("open");
+  // A freshly uploaded page stays exactly as photographed — cancelling the
+  // editor should not throw the upload away.
+  if (EDIT.fresh) {
+    if (EDIT.target.kind === "page") renderDocPages();
+    else { renderSlot("front"); renderSlot("back"); }
+    updatePrice();
+  }
 });
 
 $("edit-apply").addEventListener("click", async () => {
