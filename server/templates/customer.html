@@ -122,7 +122,10 @@
               text-overflow: ellipsis; white-space: nowrap; }
   .pdf-range { display: flex; align-items: center; gap: .4rem; margin-top: .45rem;
                flex-wrap: wrap; }
-  .pdf-range input { width: 130px; padding: .35rem .5rem; font-size: 15px; }
+  .pdf-range input { width: 150px; padding: .35rem .5rem; font-size: 15px; }
+  .range-help { margin-top: .35rem; }
+  .range-help code { font-size: .72rem; padding: .05rem .3rem; }
+  .chip-range { border-style: dashed; }
   .pdf-range .chips { display: flex; gap: .25rem; }
   .chip { border: 1px solid var(--line); background: var(--surface);
           border-radius: 999px; padding: .12rem .55rem; font-size: .72rem;
@@ -653,18 +656,23 @@ function renderPdfList() {
         '<div class="pdf-name"></div>' +
         '<div class="muted tiny meta"></div>' +
         '<div class="pdf-range">' +
-          '<label style="margin:0;font-size:.76rem;">Pages</label>' +
+          '<label style="margin:0;font-size:.76rem;">Pages to print</label>' +
           '<input type="text" class="range-in" inputmode="text" ' +
-                 'placeholder="all" value="' + (e.range === "all" ? "" : e.range) + '">' +
+                 'placeholder="e.g. 5-15" value="' + (e.range === "all" ? "" : e.range) + '">' +
           '<span class="chips">' +
             '<button type="button" class="chip" data-set="all">All</button>' +
             '<button type="button" class="chip" data-set="1">First</button>' +
             (total !== "…" && e.pages > 1
               ? '<button type="button" class="chip" data-set="' + e.pages + '">Last</button>'
               : '') +
+            (total !== "…" && e.pages > 2
+              ? '<button type="button" class="chip chip-range" data-range="1">Range…</button>'
+              : '') +
           '</span>' +
         '</div>' +
         '<div class="msg"></div>' +
+        '<div class="range-help muted tiny">Leave blank for all pages, or type ' +
+          '<code>5-15</code>, <code>7</code>, or <code>1,4,9-12</code></div>' +
       '</div>' +
       '<button type="button" class="btn btn-ghost btn-sm prev-btn">Preview</button>' +
       '<button type="button" class="btn btn-ghost btn-sm del-btn">\u2715</button>';
@@ -694,6 +702,16 @@ function renderPdfList() {
     });
     card.querySelectorAll(".chip").forEach(ch =>
       ch.addEventListener("click", () => {
+        if (ch.dataset.range) {
+          // Prefill a range the customer can edit, and focus the field.
+          const end = Math.min(e.pages, 5);
+          e.range = "1-" + end;
+          input.value = e.range;
+          input.focus();
+          input.setSelectionRange(0, input.value.length);
+          refreshPdf(e);
+          return;
+        }
         e.range = ch.dataset.set;
         refreshPdf(e);
       }));
