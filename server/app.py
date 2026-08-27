@@ -569,9 +569,32 @@ def shop_pdf_info(code):
     return jsonify({"pages": pages, "selected": selected})
 
 
+PREVIEW_MAX_IMAGE_PAGES = 12       # rasterising more than this is wasteful
+PREVIEW_DPI = 96                   # enough to read on a phone, small to send
+
+
+def _pdf_to_png_pages(pdf_bytes, max_pages=PREVIEW_MAX_IMAGE_PAGES,
+                      dpi=PREVIEW_DPI):
+    """Rasterise a PDF to a list of PNG bytes, one per page."""
+    import fitz
+    pages = []
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+        for i, page in enumerate(doc):
+            if i >= max_pages:
+                break
+            pages.append(page.get_pixmap(dpi=dpi).tobytes("png"))
+    return pages
+
+
 @app.route("/shop/<code>/preview", methods=["POST"])
 def shop_preview(code):
-    """Return the composed PDF so the customer can confirm before ordering."""
+    """Composed document for the confirm-before-paying step.
+
+    Returns the PDF by default. With ?format=images it returns the pages
+    rendered as PNGs instead: Android Chrome has no built-in PDF viewer, so
+    an embedded PDF shows a grey "Open" stub and the customer cannot see
+    what they are about to pay for.
+    """
     vendor = billing.refresh_status(db.get_vendor_by_code(code))
     if not billing.has_access(vendor):
         return jsonify({"error": "shop unavailable"}), 404
@@ -580,6 +603,21 @@ def shop_preview(code):
             request.form.get("doc_format", "document"))
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+
+    if request.args.get("format") == "images":
+        try:
+            import base64
+            pages = _pdf_to_png_pages(pdf_bytes)
+            return jsonify({
+                "total_pages": total_pages,
+                "shown": len(pages),
+                "pages": ["data:image/png;base64," +
+                          base64.b64encode(p).decode() for p in pages],
+            })
+        except Exception as e:
+            print(f"[preview] raster failed: {e}")
+            # fall through and return the PDF rather than failing outright
+
     resp = send_file(io.BytesIO(pdf_bytes), mimetype="application/pdf")
     resp.headers["X-Total-Pages"] = str(total_pages)
     return resp

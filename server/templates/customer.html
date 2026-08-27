@@ -367,7 +367,11 @@
     <div id="preview-frame-wrap"
          style="flex:1; min-height:48vh; background:var(--surface-2);
                 border:1px solid var(--line); border-radius:var(--r-sm);
-                overflow:hidden;">
+                overflow:auto;">
+      <!-- Rendered pages (used on phones: Android Chrome cannot display an
+           embedded PDF and shows a download stub instead). -->
+      <div id="preview-pages" hidden style="padding:.6rem; display:grid;
+           gap:.6rem; justify-items:center;"></div>
       <iframe id="preview-frame" title="Document preview"
               style="width:100%; height:52vh; border:0; display:block;"></iframe>
     </div>
@@ -1074,6 +1078,7 @@ function invalidatePreview() {
   }
   if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
   $("preview-frame").removeAttribute("src");
+  $("preview-pages").innerHTML = "";
 }
 updatePrice();
 
@@ -1103,16 +1108,57 @@ function buildForm() {
 
 let previewUrl = null;
 
+// Android Chrome (and most mobile browsers) cannot render an embedded PDF —
+// they show a grey download stub — so render the pages as images there.
+const USE_IMAGE_PREVIEW = (function () {
+  // Decide on the DEVICE, not on a capability probe: headless/embedded
+  // browsers report no PDF viewer even on desktop, and falling back to
+  // images there would be a needless downgrade. Phones and tablets get
+  // images; everything else keeps the inline PDF.
+  const ua = navigator.userAgent || "";
+  const isMobileUA = /Android|iPhone|iPad|iPod|Mobile|Tablet|Silk|Kindle/i.test(ua);
+  const isTouchSmall = (navigator.maxTouchPoints || 0) > 0 &&
+                       Math.min(screen.width, screen.height) < 820;
+  return isMobileUA || isTouchSmall;
+})();
+
 $("preview-btn").addEventListener("click", async () => {
   const btn = $("preview-btn"), label = btn.textContent;
   btn.disabled = true; btn.textContent = "Building…";
   try {
-    const r = await fetch(`/shop/${SHOP}/preview`, { method: "POST", body: buildForm() });
+    const url = `/shop/${SHOP}/preview` + (USE_IMAGE_PREVIEW ? "?format=images" : "");
+    const r = await fetch(url, { method: "POST", body: buildForm() });
     if (!r.ok) throw new Error("preview failed");
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    previewUrl = URL.createObjectURL(await r.blob());
-    $("preview-frame").src = previewUrl;
-    const pages = r.headers.get("X-Total-Pages") || pageCount();
+    let pages;
+    if (USE_IMAGE_PREVIEW) {
+      const d = await r.json();
+      pages = d.total_pages;
+      const wrap = $("preview-pages");
+      wrap.innerHTML = "";
+      d.pages.forEach((src, i) => {
+        const im = document.createElement("img");
+        im.src = src; im.alt = "Page " + (i + 1);
+        im.style.cssText = "max-width:100%; border:1px solid var(--line);" +
+                           "border-radius:6px; background:#fff; display:block;";
+        wrap.appendChild(im);
+      });
+      if (d.shown < d.total_pages) {
+        const note = document.createElement("div");
+        note.className = "muted tiny";
+        note.textContent = "Showing the first " + d.shown + " of " +
+                           d.total_pages + " pages.";
+        wrap.appendChild(note);
+      }
+      wrap.hidden = false;
+      $("preview-frame").style.display = "none";
+    } else {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      previewUrl = URL.createObjectURL(await r.blob());
+      $("preview-frame").src = previewUrl;
+      $("preview-frame").style.display = "block";
+      $("preview-pages").hidden = true;
+      pages = r.headers.get("X-Total-Pages") || pageCount();
+    }
     $("preview-meta").textContent =
       pages + " page" + (pages == 1 ? "" : "s") + " ready to print";
     $("preview-note").textContent = $("price-note").textContent;
