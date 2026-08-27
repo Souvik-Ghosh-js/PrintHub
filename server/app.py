@@ -728,6 +728,61 @@ def shop_payment_status(code, order_id):
     return jsonify({"order_id": order_id, "status": order["status"]})
 
 
+# How long a pending print order stays reconcilable. Cashfree sessions expire
+# well inside this, so anything older is genuinely abandoned.
+RECONCILE_MAX_AGE_MIN = 180
+RECONCILE_MIN_AGE_SEC = 45      # give the live poll a chance first
+
+
+def reconcile_pending_orders(vendor_id=None, limit=25):
+    """Ask Cashfree about print orders we still think are pending.
+
+    The browser poll only runs while the customer keeps the page open, and a
+    vendor may not have configured their webhook, so a real payment can go
+    unrecorded — the customer is charged and nothing prints. This closes that
+    gap by asking the gateway itself. Safe to call often; it only touches
+    orders that are still pending.
+    """
+    sql = ("SELECT * FROM gateway_orders WHERE purpose = 'print_job' "
+           "AND status = 'pending'")
+    params = []
+    if vendor_id:
+        sql += " AND vendor_id = %s"
+        params.append(vendor_id)
+    sql += " ORDER BY id DESC LIMIT %s"
+    params.append(int(limit))
+
+    changed = 0
+    for order in db.query(sql, tuple(params)):
+        created = order.get("created_at")
+        if isinstance(created, str):
+            try:
+                created = datetime.fromisoformat(created)
+            except ValueError:
+                created = None
+        if created:
+            age = (datetime.now() - created).total_seconds()
+            if age < RECONCILE_MIN_AGE_SEC or age > RECONCILE_MAX_AGE_MIN * 60:
+                continue
+        vendor = db.get_vendor(order["vendor_id"])
+        if not vendor or not _vendor_gateway_ready(vendor):
+            continue
+        status = cashfree.order_status(
+            vendor["cashfree_app_id"], vendor["cashfree_secret_key"],
+            vendor.get("cashfree_env") or "production", order["order_id"])
+        if status == "PAID":
+            _finalize_print_order(order, True)
+            db.log_activity("system", "payment_reconciled",
+                            f"order {order['order_id']} was paid at Cashfree "
+                            f"but never confirmed here; job released to print",
+                            vendor_id=vendor["id"])
+            changed += 1
+        elif status in ("EXPIRED", "TERMINATED"):
+            _finalize_print_order(order, False)
+            changed += 1
+    return changed
+
+
 @app.route("/payment/webhook/vendor", methods=["POST"])
 def vendor_payment_webhook():
     """Cashfree webhook for PRINT-JOB payments. Every vendor points their
@@ -880,6 +935,21 @@ def vendor_dashboard(vendor):
         live=billing.has_access(vendor) and has_gateway and has_prices,
         shop_url=f"{base}/{vendor['shop_code']}",
         webhook_url=f"{base}/payment/webhook/vendor")
+
+
+@app.route("/vendor/recheck-payments", methods=["POST"])
+@vendor_required
+def vendor_recheck_payments(vendor):
+    """Manually re-check pending payments with Cashfree (for a customer who
+    says they paid but whose job is still awaiting payment)."""
+    try:
+        n = reconcile_pending_orders(vendor_id=vendor["id"], limit=50)
+    except Exception as e:
+        flash(f"Could not reach Cashfree: {e}")
+        return redirect(url_for("vendor_dashboard"))
+    flash(f"Checked pending payments with Cashfree — {n} updated."
+          if n else "Checked pending payments — nothing new was paid.")
+    return redirect(url_for("vendor_dashboard"))
 
 
 @app.route("/vendor/pricing", methods=["POST"])
@@ -1127,6 +1197,13 @@ def worker_jobs():
     if not billing.has_access(vendor):
         # Suspended/rejected vendors lose access until payment clears (§8.3).
         return jsonify({"error": f"subscription {vendor['status']}"}), 403
+    # Catch payments the browser never confirmed (closed tab, no webhook):
+    # ask Cashfree directly so a paid job still reaches the printer.
+    try:
+        reconcile_pending_orders(vendor_id=vendor["id"])
+    except Exception as e:
+        print(f"[reconcile] {e}")
+
     # Give back any job whose worker vanished mid-print, then take out of
     # circulation anything that has already been tried too many times.
     db.release_stale_claims()
