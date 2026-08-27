@@ -730,7 +730,10 @@ def shop_payment_status(code, order_id):
 
 # How long a pending print order stays reconcilable. Cashfree sessions expire
 # well inside this, so anything older is genuinely abandoned.
-RECONCILE_MAX_AGE_MIN = 180
+# 24h: a shop can close for the night with a paid job unconfirmed, and the
+# customer will come back for their print the next morning. Cashfree keeps
+# order records far longer, so asking about a day-old order is still valid.
+RECONCILE_MAX_AGE_MIN = 24 * 60
 RECONCILE_MIN_AGE_SEC = 45      # give the live poll a chance first
 
 
