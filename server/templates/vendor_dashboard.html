@@ -204,7 +204,15 @@
 
 <!-- ---------- jobs ---------- -->
 <div class="card">
-  <div class="card-head"><h2>Recent orders</h2></div>
+  <div class="card-head"><h2>Recent orders</h2>
+    <form method="post" action="{{ url_for('vendor_recheck_payments') }}"
+          style="margin:0;">
+      <button type="submit" class="btn btn-ghost btn-sm">Re-check payments</button>
+    </form>
+  </div>
+  <p class="muted tiny" style="margin:-.4rem 0 .8rem;">If a customer paid but
+    their job still says &ldquo;awaiting payment&rdquo;, this asks Cashfree
+    directly and releases the job to the printer.</p>
   <div class="table-scroll">
     <table>
       <thead><tr><th>#</th><th>Document</th><th>Mode</th><th>Copies</th>
