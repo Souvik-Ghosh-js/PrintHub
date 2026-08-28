@@ -5,15 +5,42 @@
 
 {% block head %}
 <style>
-  .hero { text-align: center; padding: 2rem 0 1.5rem; }
-  .hero h1 { font-size: 2rem; }
+  .hero { text-align: center; padding: 1.6rem 0 .6rem; }
+  .hero h1 { font-size: 2rem; letter-spacing: -.03em; }
   .hero p { color: var(--muted); max-width: 460px; margin: 0 auto; }
-  .how { display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem;
-         margin: 1.75rem 0; }
-  @media (max-width: 560px) { .how { grid-template-columns: 1fr; } }
-  .how-item { text-align: center; padding: 1rem .75rem; background: var(--surface);
-              border: 1px solid var(--line); border-radius: var(--r); }
-  .how-ico { font-size: 1.6rem; }
+
+  /* ---------------- animated explainer ---------------- */
+  .demo {
+    position: relative; background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--r-lg); padding: 1.1rem 1rem .9rem; margin: 1.4rem 0 1rem;
+    box-shadow: var(--shadow-sm); overflow: hidden;
+  }
+  .demo-stage { width: 100%; max-width: 460px; margin: 0 auto; display: block; }
+
+  /* step captions under the scene */
+  .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: .4rem;
+           margin-top: .9rem; }
+  .step-t { text-align: center; padding: .5rem .3rem; border-radius: var(--r-sm);
+            border: 1px solid transparent; transition: background .3s, border-color .3s,
+            color .3s, transform .3s; }
+  .step-t .n { font-size: .68rem; font-weight: 700; letter-spacing: .06em;
+               text-transform: uppercase; color: var(--muted); }
+  .step-t .l { font-size: .82rem; font-weight: 650; color: var(--ink-2); }
+  .step-t.on { background: var(--brand-50); border-color: var(--brand-300);
+               transform: translateY(-2px); }
+  .step-t.on .n { color: var(--brand-600); }
+  .step-t.on .l { color: var(--brand-700); }
+  @media (max-width: 520px) {
+    .steps { grid-template-columns: repeat(2, 1fr); }
+    .hero h1 { font-size: 1.55rem; }
+  }
+
+  .replay { position: absolute; top: .7rem; right: .8rem; font-size: .72rem;
+            color: var(--muted); background: var(--surface-2); border: 1px solid var(--line);
+            border-radius: 999px; padding: .18rem .6rem; cursor: pointer; }
+  .replay:hover { color: var(--brand-600); border-color: var(--brand-300); }
+
+  /* ---------------- shops ---------------- */
   .shop-link { display: flex; align-items: center; gap: .85rem; padding: .9rem 1rem;
                border: 1px solid var(--line); border-radius: var(--r);
                background: var(--surface); color: inherit; margin-bottom: .6rem;
@@ -23,25 +50,183 @@
   .shop-ico { width: 40px; height: 40px; border-radius: 11px; flex: none;
               display: grid; place-items: center; color: #fff; font-size: 1.1rem;
               background: linear-gradient(135deg, var(--brand-500), var(--brand-700)); }
+
+  /* ---------------- scene elements ---------------- */
+  .sc { transition: opacity .45s ease, transform .45s ease; }
+  .sc-hidden { opacity: 0; }
+  #ph-body { transition: transform .5s cubic-bezier(.34,1.3,.5,1); }
+  #scanline { transform-origin: center; }
+  #paper1, #paper2 { transition: transform .8s cubic-bezier(.3,.8,.4,1), opacity .4s; }
+  #tick circle { transition: opacity .3s; }
+  #tick path { stroke-dasharray: 26; stroke-dashoffset: 26;
+               transition: stroke-dashoffset .45s ease .1s; }
+  #tick.on path { stroke-dashoffset: 0; }
+  .pulse { animation: pulse 1.6s ease-in-out infinite; transform-origin: center; }
+  @keyframes pulse { 0%,100% { opacity:.25 } 50% { opacity:.7 } }
+  @media (prefers-reduced-motion: reduce) {
+    .sc, #ph-body, #paper1, #paper2, #tick path { transition: none !important; }
+    .pulse { animation: none; }
+  }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="hero">
   <h1>Print anything, straight from your phone</h1>
-  <p>Scan the QR at your print shop, photograph your document, pay online —
-    it prints while you wait.</p>
+  <p>Scan the QR at the counter, snap your document, pay — it prints while
+    you wait. No app, no login, no queue.</p>
 </div>
 
-{% if error %}<div class="note note-warn">{{ error }}</div>{% endif %}
+{% if error %}<div class="note note-warn" style="margin-bottom:1rem;">{{ error }}</div>{% endif %}
 
-<div class="how">
-  <div class="how-item"><div class="how-ico">📷</div>
-    <strong>1 · Scan</strong><div class="muted tiny">Photograph your document</div></div>
-  <div class="how-item"><div class="how-ico">✨</div>
-    <strong>2 · Auto-fix</strong><div class="muted tiny">Cropped &amp; cleaned by AI</div></div>
-  <div class="how-item"><div class="how-ico">💳</div>
-    <strong>3 · Pay</strong><div class="muted tiny">UPI or card, then it prints</div></div>
+<!-- ================= animated explainer ================= -->
+<div class="demo">
+  <button type="button" class="replay" id="replay">↻ Replay</button>
+  <svg class="demo-stage" viewBox="0 0 460 230" role="img"
+       aria-label="Animation: scan the QR code, photograph your document, pay, and it prints">
+    <defs>
+      <linearGradient id="gBrand" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#4338ca"/>
+      </linearGradient>
+      <clipPath id="slotClip"><rect x="300" y="146" width="120" height="56"/></clipPath>
+    </defs>
+
+    <!-- ---------- QR poster on the counter ---------- -->
+    <g id="qr-card" class="sc">
+      <rect x="18" y="52" width="86" height="104" rx="9"
+            fill="var(--surface)" stroke="var(--line)" stroke-width="2"/>
+      <rect x="18" y="52" width="86" height="20" rx="9" fill="url(#gBrand)"/>
+      <rect x="18" y="63" width="86" height="9" fill="url(#gBrand)"/>
+      <text x="61" y="66" text-anchor="middle" fill="#fff"
+            font-size="8" font-weight="700" font-family="inherit">SCAN TO PRINT</text>
+      <!-- qr blocks -->
+      <g fill="var(--ink)">
+        <rect x="32" y="80" width="16" height="16" rx="2"/>
+        <rect x="74" y="80" width="16" height="16" rx="2"/>
+        <rect x="32" y="122" width="16" height="16" rx="2"/>
+        <rect x="55" y="82" width="5" height="5"/><rect x="62" y="89" width="5" height="5"/>
+        <rect x="55" y="96" width="5" height="5"/><rect x="69" y="103" width="5" height="5"/>
+        <rect x="55" y="110" width="5" height="5"/><rect x="62" y="117" width="5" height="5"/>
+        <rect x="76" y="110" width="5" height="5"/><rect x="69" y="124" width="5" height="5"/>
+        <rect x="83" y="124" width="5" height="5"/><rect x="76" y="131" width="5" height="5"/>
+      </g>
+      <rect x="18" y="52" width="86" height="104" rx="9" fill="none"
+            stroke="var(--brand-500)" stroke-width="2" class="pulse"/>
+    </g>
+
+    <!-- ---------- phone ---------- -->
+    <g id="phone">
+      <g id="ph-body">
+        <rect x="168" y="30" width="112" height="170" rx="16"
+              fill="var(--surface)" stroke="var(--ink-2)" stroke-width="2.5"/>
+        <rect x="176" y="42" width="96" height="146" rx="8" fill="var(--surface-2)"/>
+        <rect x="208" y="34" width="32" height="5" rx="2.5" fill="var(--ink-2)"/>
+
+        <!-- screen 1: camera scanning the QR -->
+        <g id="s-scan" class="sc">
+          <rect x="192" y="66" width="64" height="64" rx="6" fill="none"
+                stroke="var(--brand-500)" stroke-width="2" stroke-dasharray="14 10"/>
+          <g fill="var(--muted)" opacity=".65">
+            <rect x="200" y="74" width="11" height="11" rx="1.5"/>
+            <rect x="237" y="74" width="11" height="11" rx="1.5"/>
+            <rect x="200" y="111" width="11" height="11" rx="1.5"/>
+            <rect x="218" y="80" width="4" height="4"/><rect x="225" y="88" width="4" height="4"/>
+            <rect x="218" y="97" width="4" height="4"/><rect x="232" y="104" width="4" height="4"/>
+          </g>
+          <rect id="scanline" x="192" y="66" width="64" height="3" rx="1.5"
+                fill="var(--brand-500)" opacity=".9"/>
+          <text x="224" y="152" text-anchor="middle" fill="var(--muted)"
+                font-size="9" font-family="inherit">Point at the code</text>
+        </g>
+
+        <!-- screen 2: the captured document, auto-cropped -->
+        <g id="s-doc" class="sc sc-hidden">
+          <rect x="196" y="60" width="56" height="74" rx="4" fill="#fff"
+                stroke="var(--brand-500)" stroke-width="2"/>
+          <g fill="var(--muted)" opacity=".55">
+            <rect x="203" y="70" width="34" height="4" rx="2"/>
+            <rect x="203" y="80" width="42" height="3" rx="1.5"/>
+            <rect x="203" y="88" width="38" height="3" rx="1.5"/>
+            <rect x="203" y="96" width="41" height="3" rx="1.5"/>
+            <rect x="203" y="104" width="26" height="3" rx="1.5"/>
+            <rect x="203" y="116" width="20" height="12" rx="2" opacity=".8"/>
+          </g>
+          <!-- corner handles -->
+          <g fill="var(--brand-600)">
+            <circle cx="196" cy="60" r="4"/><circle cx="252" cy="60" r="4"/>
+            <circle cx="252" cy="134" r="4"/><circle cx="196" cy="134" r="4"/>
+          </g>
+          <text x="224" y="152" text-anchor="middle" fill="var(--brand-600)"
+                font-size="9" font-weight="650" font-family="inherit">Edges found ✨</text>
+        </g>
+
+        <!-- screen 3: payment -->
+        <g id="s-pay" class="sc sc-hidden">
+          <rect x="190" y="66" width="68" height="44" rx="6" fill="url(#gBrand)"/>
+          <rect x="190" y="78" width="68" height="7" fill="rgba(255,255,255,.35)"/>
+          <rect x="196" y="94" width="26" height="4" rx="2" fill="rgba(255,255,255,.75)"/>
+          <text x="224" y="128" text-anchor="middle" fill="var(--ink)"
+                font-size="13" font-weight="750" font-family="inherit">₹6.00</text>
+          <text x="224" y="152" text-anchor="middle" fill="var(--muted)"
+                font-size="9" font-family="inherit">UPI · card · wallet</text>
+        </g>
+
+        <!-- screen 4: paid -->
+        <g id="s-done" class="sc sc-hidden">
+          <g id="tick">
+            <circle cx="224" cy="95" r="26" fill="var(--ok-bg)"/>
+            <path d="M212 95 l9 9 17-18" fill="none" stroke="var(--ok)"
+                  stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </g>
+          <text x="224" y="140" text-anchor="middle" fill="var(--ok)"
+                font-size="10" font-weight="700" font-family="inherit">Paid</text>
+          <text x="224" y="154" text-anchor="middle" fill="var(--muted)"
+                font-size="9" font-family="inherit">Printing now…</text>
+        </g>
+      </g>
+    </g>
+
+    <!-- ---------- printer ---------- -->
+    <g id="printer">
+      <!-- sheets emerging (behind the printer body) -->
+      <g clip-path="url(#slotClip)">
+        <g id="paper1" transform="translate(0,0)" opacity="0">
+          <rect x="330" y="148" width="60" height="52" rx="3" fill="#fff"
+                stroke="var(--line)" stroke-width="1.5"/>
+          <g fill="var(--muted)" opacity=".5">
+            <rect x="337" y="156" width="30" height="3.5" rx="1.7"/>
+            <rect x="337" y="164" width="44" height="2.5" rx="1.2"/>
+            <rect x="337" y="171" width="40" height="2.5" rx="1.2"/>
+            <rect x="337" y="178" width="43" height="2.5" rx="1.2"/>
+          </g>
+        </g>
+      </g>
+
+      <rect x="300" y="96" width="120" height="58" rx="10" fill="var(--surface)"
+            stroke="var(--ink-2)" stroke-width="2.5"/>
+      <rect x="316" y="74" width="88" height="26" rx="5" fill="var(--surface-2)"
+            stroke="var(--line)" stroke-width="2"/>
+      <rect x="312" y="140" width="96" height="7" rx="3.5" fill="var(--surface-2)"
+            stroke="var(--line)" stroke-width="1.5"/>
+      <circle id="led" cx="404" cy="108" r="4" fill="var(--muted)" opacity=".5"/>
+      <rect x="316" y="118" width="30" height="4" rx="2" fill="var(--line)"/>
+      <text x="360" y="216" text-anchor="middle" fill="var(--muted)"
+            font-size="9" font-family="inherit">Collect at the counter</text>
+    </g>
+
+    <!-- connection sparkle between phone and printer -->
+    <g id="link" class="sc sc-hidden">
+      <path d="M286 118 q14 -14 28 0" fill="none" stroke="var(--brand-500)"
+            stroke-width="2" stroke-dasharray="4 4" stroke-linecap="round"/>
+    </g>
+  </svg>
+
+  <div class="steps">
+    <div class="step-t" data-step="0"><div class="n">Step 1</div><div class="l">Scan the QR</div></div>
+    <div class="step-t" data-step="1"><div class="n">Step 2</div><div class="l">Snap &amp; auto-fix</div></div>
+    <div class="step-t" data-step="2"><div class="n">Step 3</div><div class="l">Pay on your phone</div></div>
+    <div class="step-t" data-step="3"><div class="n">Step 4</div><div class="l">Collect the print</div></div>
+  </div>
 </div>
 
 {% if shops %}
@@ -70,4 +255,105 @@
   Run a print shop? <a href="{{ url_for('vendor_login') }}">Sign in</a> ·
   <a href="{{ url_for('admin_login') }}">Administrator</a>
 </p>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const screens = ["s-scan", "s-doc", "s-pay", "s-done"];
+  const caps = Array.from(document.querySelectorAll(".step-t"));
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let timers = [];
+
+  function show(id) {
+    screens.forEach(s => $(s).classList.toggle("sc-hidden", s !== id));
+  }
+  function markStep(i) {
+    caps.forEach((c, n) => c.classList.toggle("on", n === i));
+  }
+  function at(ms, fn) { timers.push(setTimeout(fn, ms)); }
+
+  // The scan line sweeping down the QR in step 1.
+  let sweep = null;
+  function startSweep() {
+    const line = $("scanline");
+    let t = 0;
+    stopSweep();
+    sweep = setInterval(() => {
+      t = (t + 0.03) % 1;
+      line.setAttribute("y", (66 + t * 61).toFixed(1));
+    }, 30);
+  }
+  function stopSweep() { if (sweep) { clearInterval(sweep); sweep = null; } }
+
+  function reset() {
+    timers.forEach(clearTimeout); timers = [];
+    stopSweep();
+    show("s-scan"); markStep(0);
+    $("qr-card").style.opacity = "1";
+    $("ph-body").style.transform = "translateX(0)";
+    $("link").classList.add("sc-hidden");
+    $("tick").classList.remove("on");
+    $("led").setAttribute("fill", "var(--muted)");
+    $("led").setAttribute("opacity", ".5");
+    const p = $("paper1");
+    p.setAttribute("opacity", "0");
+    p.style.transform = "translateY(-56px)";
+  }
+
+  function play() {
+    reset();
+    if (reduce) {           // no motion: just land on the finished state
+      show("s-done"); markStep(3);
+      $("paper1").setAttribute("opacity", "1");
+      $("paper1").style.transform = "translateY(0)";
+      $("tick").classList.add("on");
+      return;
+    }
+    startSweep();
+
+    // 1) scanning the QR
+    at(1500, () => { stopSweep(); $("qr-card").style.opacity = ".25"; });
+
+    // 2) the document, auto-cropped
+    at(1800, () => { show("s-doc"); markStep(1); });
+
+    // 3) payment
+    at(3600, () => { show("s-pay"); markStep(2); });
+
+    // 4) paid -> the job travels to the printer
+    at(5200, () => {
+      show("s-done");
+      $("tick").classList.add("on");
+      $("link").classList.remove("sc-hidden");
+    });
+    at(5700, () => {
+      markStep(3);
+      $("led").setAttribute("fill", "var(--ok)");
+      $("led").setAttribute("opacity", "1");
+      const p = $("paper1");
+      p.setAttribute("opacity", "1");
+      p.style.transform = "translateY(0)";     // slide the sheet out
+    });
+
+    // loop
+    at(8200, play);
+  }
+
+  // Only animate while the explainer is on screen.
+  const demo = document.querySelector(".demo");
+  if ("IntersectionObserver" in window) {
+    new IntersectionObserver((entries) => {
+      entries.forEach(e => {
+        if (e.isIntersecting) play();
+        else { timers.forEach(clearTimeout); timers = []; stopSweep(); }
+      });
+    }, { threshold: .35 }).observe(demo);
+  } else {
+    play();
+  }
+  $("replay").addEventListener("click", play);
+})();
+</script>
 {% endblock %}
