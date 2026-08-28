@@ -28,6 +28,9 @@ cd "$APP_DIR/server"
 echo "==> Apply any new schema objects (CREATE TABLE IF NOT EXISTS is safe)..."
 sudo mysql < "$APP_DIR/server/schema.sql" || true
 
+echo "==> Apply column migrations (idempotent)..."
+sudo mysql < "$APP_DIR/deploy/migrate.sql"
+
 echo "==> Restart..."
 sudo systemctl restart printhub.service
 sleep 2
