@@ -36,6 +36,13 @@ app.secret_key = config.SECRET_KEY
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
 
+@app.context_processor
+def inject_contact():
+    """Contact details are needed on the public pages and in the vendor
+    portal, so make them available to every template."""
+    return {"contact_phones": config.CONTACT_PHONES}
+
+
 # ===========================================================================
 # Auth decorators
 # ===========================================================================

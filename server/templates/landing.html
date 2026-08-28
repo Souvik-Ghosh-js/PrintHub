@@ -5,6 +5,7 @@
   <a href="#how">How it works</a>
   <a href="#features">Features</a>
   <a href="#pricing">Pricing</a>
+  <a href="#contact">Contact</a>
   <a href="{{ url_for('vendor_login') }}">Shop login</a>
 {% endblock %}
 
@@ -140,6 +141,16 @@
   .cta-band .btn-ghost { background: rgba(255,255,255,.14); color: #fff;
                          border-color: rgba(255,255,255,.35); }
   .cta-band .btn-ghost:hover { background: rgba(255,255,255,.24); }
+  .cta-band .btn-light { background: #fff; color: var(--brand-700); }
+  .cta-band .btn-light:hover { background: rgba(255,255,255,.9); }
+
+  .contact-card { display: flex; align-items: center; gap: .9rem; flex-wrap: wrap; }
+  .contact-card .ico { width: 42px; height: 42px; border-radius: 12px; flex: none;
+                       display: grid; place-items: center; font-size: 1.2rem;
+                       background: var(--brand-50); }
+  .contact-card .phone { font-size: 1.05rem; font-weight: 700; color: var(--ink);
+                         letter-spacing: -.01em; display: block; }
+  .contact-card .phone:hover { color: var(--brand-600); text-decoration: none; }
 
   .shop-link { display: flex; align-items: center; gap: .85rem; padding: .9rem 1rem;
                border: 1px solid var(--line); border-radius: var(--r);
@@ -586,19 +597,53 @@
 </div>
 {% endif %}
 
+<!-- ==================== CONTACT ==================== -->
+<div class="sec" id="contact">
+  <div class="sec-head">
+    <div class="eyebrow">Talk to us</div>
+    <h2>Ready to set up your shop?</h2>
+    <p>Call or WhatsApp us and we'll get you running — including the
+      installation on your shop PC.</p>
+  </div>
+  <div class="g2">
+    {% for c in contact_phones %}
+    <div class="card contact-card">
+      <div class="ico">📞</div>
+      <div style="flex:1; min-width:0;">
+        <a class="phone" href="tel:{{ c.tel }}">{{ c.label }}</a>
+        <div class="muted tiny">Call or WhatsApp</div>
+      </div>
+      <div class="btn-row" style="flex-wrap:nowrap;">
+        <a class="btn btn-primary btn-sm" href="tel:{{ c.tel }}">Call</a>
+        <a class="btn btn-ghost btn-sm" target="_blank" rel="noopener"
+           href="https://wa.me/{{ c.wa }}?text=Hi%2C%20I%20want%20to%20set%20up%20PrintHub%20at%20my%20print%20shop">
+          WhatsApp</a>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
 <!-- ==================== CTA ==================== -->
 <div class="cta-band" id="get-started">
   <h2>Turn your counter into a self-service print shop</h2>
   <p>Set up today. Your customers will work it out on their own.</p>
   <div class="btn-row" style="justify-content:center;">
-    <a class="btn btn-ghost btn-lg" href="{{ url_for('vendor_login') }}">Shop owner sign in</a>
+    {% for c in contact_phones %}
+    <a class="btn {{ 'btn-light' if loop.first else 'btn-ghost' }} btn-lg"
+       href="tel:{{ c.tel }}">📞 {{ c.label }}</a>
+    {% endfor %}
   </div>
   <p style="margin:.9rem 0 0; font-size:.82rem; color:rgba(255,255,255,.8);">
-    To open a new shop account, contact the administrator — your login and QR
-    code are created as soon as your first payment clears.</p>
+    Call us to open a shop account — your login and QR code are created as
+    soon as your first payment clears.
+    <a href="{{ url_for('vendor_login') }}"
+       style="color:#fff; text-decoration:underline;">Already have an account?</a></p>
 </div>
 
 <p class="center muted tiny" style="margin-top:1.2rem;">
+  {% for c in contact_phones %}<a href="tel:{{ c.tel }}">{{ c.label }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+  <br style="margin-bottom:.3rem;">
   Already running a shop? <a href="{{ url_for('vendor_login') }}">Sign in</a> ·
   <a href="{{ url_for('admin_login') }}">Administrator</a>
 </p>

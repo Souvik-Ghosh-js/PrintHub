@@ -29,6 +29,13 @@ GRACE_DAYS = 15                  # renewal grace period (spec §8.3)
 ADMIN_USER = os.environ.get("PRINTHUB_ADMIN_USER", "admin")
 ADMIN_PASSWORD = os.environ.get("PRINTHUB_ADMIN_PASSWORD", "CHANGE_ME_admin_password")
 
+# --- How shop owners reach us (shown on the site) ---
+# Phone numbers in international form so tel:/wa.me links work from a phone.
+CONTACT_PHONES = [
+    {"label": "+91 99033 47290", "tel": "+919903347290", "wa": "919903347290"},
+    {"label": "+91 62955 66948", "tel": "+916295566948", "wa": "916295566948"},
+]
+
 # --- Supported document formats & their page layouts (spec §1) ---
 # layout: how front/back are placed on the printed A4 page AND shown in the UI.
 DOC_FORMATS = {

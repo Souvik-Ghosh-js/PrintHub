@@ -25,5 +25,7 @@
   </form>
 </div>
 <p class="muted tiny center" style="margin-top:1rem;">
-  Lost your credentials? Contact the PrintHub administrator.</p>
+  Lost your credentials? Call us —
+  {% for c in contact_phones %}<a href="tel:{{ c.tel }}">{{ c.label }}</a>{% if not loop.last %} or {% endif %}{% endfor %}
+</p>
 {% endblock %}

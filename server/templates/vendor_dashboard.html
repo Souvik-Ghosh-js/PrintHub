@@ -149,7 +149,9 @@
     {% if worker_exe %}
       <a class="btn btn-primary" href="{{ url_for('download_worker') }}">⬇ Download for Windows</a>
     {% else %}
-      <p class="muted">Ask the administrator for the installer.</p>
+      <p class="muted">Ask us for the installer —
+        {% for c in contact_phones %}<a href="tel:{{ c.tel }}">{{ c.label }}</a>{% if not loop.last %} or {% endif %}{% endfor %}
+      </p>
     {% endif %}
   </div>
 
@@ -235,6 +237,19 @@
       {% endfor %}
       </tbody>
     </table>
+  </div>
+</div>
+
+<!-- ---------- support ---------- -->
+<div class="card center">
+  <p class="muted tiny" style="margin:0 0 .5rem;">Need help with your shop,
+    printers or payments?</p>
+  <div class="btn-row" style="justify-content:center;">
+    {% for c in contact_phones %}
+    <a class="btn btn-ghost btn-sm" href="tel:{{ c.tel }}">📞 {{ c.label }}</a>
+    <a class="btn btn-ghost btn-sm" target="_blank" rel="noopener"
+       href="https://wa.me/{{ c.wa }}">WhatsApp</a>
+    {% endfor %}
   </div>
 </div>
 
