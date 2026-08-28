@@ -41,7 +41,8 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 def inject_contact():
     """Contact details are needed on the public pages and in the vendor
     portal, so make them available to every template."""
-    return {"contact_phones": config.CONTACT_PHONES}
+    return {"contact_phones": config.CONTACT_PHONES,
+            "installation_fee": config.INSTALLATION_FEE}
 
 
 # ===========================================================================
@@ -1002,6 +1003,10 @@ def vendor_dashboard(vendor):
         live=billing.has_access(vendor) and has_gateway and has_prices,
         days_left=billing.days_until_renewal(vendor),
         autopay_on=(vendor.get("autopay_status") or "").upper() == "ACTIVE",
+        autopay_supported=vendor["plan"] in AUTOPAY_INTERVAL,
+        awaiting_mandate=billing.awaiting_mandate(vendor),
+        mandate_fee=billing.renewal_amount(vendor["plan"])
+                    if vendor["plan"] in AUTOPAY_INTERVAL else 0,
         autopay_pending=(vendor.get("autopay_status") or "").upper()
                         in ("INITIALIZED", "BANK_APPROVAL_PENDING"),
         renewal_amount=(billing.renewal_amount(vendor["plan"])
@@ -1078,12 +1083,15 @@ def _start_subscription_checkout(vendor, purpose):
         amount = amounts["total"]
         plan_fee = amounts["subscription_fee"]
         install_fee = amounts["installation_fee"]
+        mandate_fee = amounts["mandate_fee"]
         prefix = "SUB"
-        note = (f"PrintHub {vendor['plan']} subscription "
+        note = (f"PrintHub ₹{install_fee} installation"
+                if mandate_fee else
+                f"PrintHub {vendor['plan']} subscription "
                 f"+ ₹{install_fee} installation")
     else:
         amount = billing.renewal_amount(vendor["plan"])
-        plan_fee, install_fee = amount, 0
+        plan_fee, install_fee, mandate_fee = amount, 0, 0
         prefix = "REN"
         note = f"PrintHub {vendor['plan']} renewal"
 
@@ -1106,6 +1114,7 @@ def _start_subscription_checkout(vendor, purpose):
     return render_template("pay.html", shop_name=vendor["shop_name"],
                            plan=vendor["plan"], amount=amount,
                            plan_fee=plan_fee, install_fee=install_fee,
+                           mandate_fee=mandate_fee,
                            order_id=order_id, purpose=purpose,
                            payment_session_id=result["payment_session_id"],
                            cf_env=config.PLATFORM_CASHFREE_ENV), None
@@ -1115,7 +1124,8 @@ def _start_subscription_checkout(vendor, purpose):
 # Autopay — the vendor authorises a mandate once and Cashfree debits each
 # cycle by itself (plan_type PERIODIC). We never schedule or raise a charge.
 # ===========================================================================
-AUTOPAY_INTERVAL = {"monthly": ("MONTH", 1), "yearly": ("YEAR", 1)}
+# Monthly only. Yearly is a one-time charge the vendor renews themselves.
+AUTOPAY_INTERVAL = {"monthly": ("MONTH", 1)}
 
 
 @app.route("/vendor/autopay/start", methods=["POST"])
@@ -1126,7 +1136,8 @@ def vendor_autopay_start(vendor):
         flash("Lifetime plans have nothing to renew — autopay is not needed.")
         return redirect(url_for("vendor_dashboard"))
     if vendor["plan"] not in AUTOPAY_INTERVAL:
-        flash("Autopay is not available for this plan.")
+        flash("Autopay is only available on the monthly plan. Yearly is a "
+              "one-time payment you renew when it runs out.")
         return redirect(url_for("vendor_dashboard"))
     if not cashfree.configured(config.PLATFORM_CASHFREE_APP_ID,
                                config.PLATFORM_CASHFREE_SECRET_KEY):
@@ -1141,8 +1152,9 @@ def vendor_autopay_start(vendor):
 
     interval_type, intervals = AUTOPAY_INTERVAL[vendor["plan"]]
     sub_id = f"PHSUB_{vendor['id']}_{int(time.time())}"
-    # The mandate should start charging when the CURRENT period ends, so the
-    # vendor is never billed twice for the same month.
+    # Approving the mandate collects month one immediately, then recurs. Only
+    # defer the first debit when the vendor has already paid for a period that
+    # is still running, so nobody is billed twice for the same month.
     first_charge = None
     if vendor.get("renews_at"):
         r = vendor["renews_at"]
@@ -1378,8 +1390,14 @@ def pay_return():
                     "on its way.")
     vendor = db.get_vendor(order["vendor_id"])
     if order["purpose"] == "first_payment":
-        message = (f"Subscription for {vendor['shop_name']} is active. "
-                   f"Amount paid: ₹{order['amount']}.")
+        if billing.uses_autopay(vendor["plan"]):
+            message = (f"Installation paid for {vendor['shop_name']} "
+                       f"(₹{order['amount']}). One step left: sign in and "
+                       f"approve your ₹{billing.renewal_amount(vendor['plan'])}"
+                       f"/month autopay to start the plan.")
+        else:
+            message = (f"Subscription for {vendor['shop_name']} is active. "
+                       f"Amount paid: ₹{order['amount']}.")
     else:
         message = (f"Renewal received — subscription extended for "
                    f"{vendor['shop_name']}. Amount paid: ₹{order['amount']}.")

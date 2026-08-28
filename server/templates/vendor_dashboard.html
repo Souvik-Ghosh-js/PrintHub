@@ -202,7 +202,13 @@
         — ₹{{ renewal_amount }} keeps your shop online. Renew below so your
         customers are never turned away.</div>
     {% endif %}
-    {% if vendor.status == 'grace' %}
+    {% if awaiting_mandate %}
+      <div class="note note-warn" style="margin-bottom:.8rem;">
+        <strong>One step left — turn on autopay.</strong>
+        Your ₹{{ installation_fee }} installation is paid. Approving the
+        mandate below charges your first month of ₹{{ mandate_fee }} and keeps
+        it running automatically after that.</div>
+    {% elif vendor.status == 'grace' %}
       <div class="note note-warn" style="margin-bottom:.8rem;">
         Payment overdue — you're in the grace period until {{ vendor.grace_until }}.
         Renew now to avoid suspension.</div>
@@ -236,19 +242,30 @@
         <span class="pill pill-warn">autopay pending</span>
         <span class="muted tiny">Waiting for your bank to confirm the mandate.
           Refresh in a few minutes.</span>
-      {% else %}
+      {% elif autopay_supported %}
         <div class="row-between" style="flex-wrap:wrap; gap:.6rem;">
           <div>
-            <strong style="font-size:.92rem;">Never lose a day to a missed renewal</strong>
-            <div class="muted tiny">Approve once in your UPI app and
-              ₹{{ plans[vendor.plan].fee }} is paid automatically each
-              {{ 'month' if vendor.plan == 'monthly' else 'year' }}. Cancel any time.</div>
+            <strong style="font-size:.92rem;">
+              {% if awaiting_mandate %}Start your monthly plan
+              {% else %}Never lose a day to a missed renewal{% endif %}</strong>
+            <div class="muted tiny">Approve once in your UPI app.
+              {% if awaiting_mandate %}₹{{ mandate_fee }} is charged now for
+                your first month, then automatically every month.
+              {% else %}₹{{ plans[vendor.plan].fee }} is paid automatically
+                each month.{% endif %} Cancel any time.</div>
           </div>
           <form method="post" action="{{ url_for('vendor_autopay_start') }}"
                 style="margin:0;">
-            <button type="submit" class="btn btn-primary btn-sm">Turn on autopay</button>
+            <button type="submit"
+                    class="btn {{ 'btn-success' if awaiting_mandate else 'btn-primary' }} btn-sm">
+              {{ 'Turn on autopay — ₹' ~ mandate_fee if awaiting_mandate
+                 else 'Turn on autopay' }}</button>
           </form>
         </div>
+      {% else %}
+        <p class="muted tiny" style="margin:0;">
+          Yearly is a one-time payment — there's no autopay. When it runs out,
+          renew from this page or call us and we'll send you a payment link.</p>
       {% endif %}
     </div>
   {% endif %}

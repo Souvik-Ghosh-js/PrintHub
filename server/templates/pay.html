@@ -13,9 +13,11 @@
   <div style="background:var(--surface-2); border:1px solid var(--line);
               border-radius:var(--r); padding:1rem; margin:1.1rem 0;">
     {% if purpose == 'first_payment' %}
+      {% if plan_fee %}
       <div class="row-between"><span class="muted">{{ plan|capitalize }} plan</span>
         <span>₹{{ plan_fee }}</span></div>
-      <div class="row-between" style="margin-top:.4rem;">
+      {% endif %}
+      <div class="row-between"{% if plan_fee %} style="margin-top:.4rem;"{% endif %}>
         <span class="muted">One-time installation</span><span>₹{{ install_fee }}</span></div>
       <hr style="border:none;border-top:1px solid var(--line);margin:.7rem 0;">
     {% endif %}
@@ -24,6 +26,13 @@
       <strong style="font-size:1.5rem;">₹{{ amount }}</strong>
     </div>
   </div>
+
+  {% if mandate_fee %}
+  <p class="muted tiny" style="margin:-.4rem 0 1rem;">
+    Next step after this: approve your ₹{{ mandate_fee }}/month autopay
+    mandate. That charges your first month and keeps the shop running
+    automatically — no reminders to chase.</p>
+  {% endif %}
 
   <button id="pay-btn" class="btn btn-success btn-block btn-lg">Pay ₹{{ amount }} securely</button>
 

@@ -17,11 +17,45 @@ from config import PLANS, INSTALLATION_FEE, GRACE_DAYS
 # ---------------------------------------------------------------------------
 # Amounts (spec §5)
 # ---------------------------------------------------------------------------
+# Monthly vendors pay the plan fee through an autopay mandate, whose first
+# debit lands immediately on approval. Their signup order is therefore the
+# installation fee ALONE — charging the plan fee here too would bill them
+# twice for month one. Yearly and lifetime have no mandate, so they pay the
+# plan fee and installation together as one order.
+def awaiting_mandate(vendor) -> bool:
+    """Paid installation, but the plan fee has never been collected because
+    the mandate was never approved. Distinguishes "new vendor still setting
+    up" from "existing vendor who let their subscription lapse" — both sit in
+    grace, but they need opposite messages."""
+    if not vendor or not uses_autopay(vendor.get("plan", "")):
+        return False
+    if (vendor.get("autopay_status") or "").upper() == "ACTIVE":
+        return False
+    try:
+        return not any(p["kind"] in ("subscription", "renewal")
+                       for p in db.list_payments(vendor_id=vendor["id"]))
+    except Exception:
+        return False
+
+
+def uses_autopay(plan: str) -> bool:
+    """Only the monthly plan recurs via a mandate. Yearly is a one-time
+    charge that the vendor renews themselves; lifetime never renews."""
+    return plan == "monthly"
+
+
 def first_payment(plan: str) -> dict:
-    """Subscription fee + one-time installation fee = first combined payment."""
+    """What the vendor's signup order must collect."""
     p = PLANS[plan]
+    if uses_autopay(plan):
+        # Plan fee is collected by the mandate, not by this order.
+        return {"plan": plan, "subscription_fee": 0,
+                "installation_fee": INSTALLATION_FEE,
+                "mandate_fee": p["fee"],
+                "total": INSTALLATION_FEE}
     return {"plan": plan, "subscription_fee": p["fee"],
             "installation_fee": INSTALLATION_FEE,
+            "mandate_fee": 0,
             "total": p["fee"] + INSTALLATION_FEE}
 
 
@@ -63,21 +97,29 @@ def record_first_payment(vendor, method="cashfree", reference=None):
     db.insert_payment({"vendor_id": vendor["id"], "kind": "installation",
                        "plan": vendor["plan"], "amount": amounts["installation_fee"],
                        "status": "paid", "method": method, "reference": reference})
-    db.insert_payment({"vendor_id": vendor["id"], "kind": "subscription",
-                       "plan": vendor["plan"], "amount": amounts["subscription_fee"],
-                       "status": "paid", "method": method, "reference": reference})
+    if amounts["subscription_fee"]:
+        db.insert_payment({"vendor_id": vendor["id"], "kind": "subscription",
+                           "plan": vendor["plan"], "amount": amounts["subscription_fee"],
+                           "status": "paid", "method": method, "reference": reference})
 
     login_id, password, worker_token = generate_credentials()
     now = datetime.now()
-    db.update_vendor(vendor["id"], {
+    fields = {
         "status": "active",
         "subscribed_at": now,
-        "renews_at": _next_renewal(vendor["plan"], now),
         "grace_until": None,
         "login_id": login_id,
         "password_hash": generate_password_hash(password),
         "worker_token": worker_token,
-    })
+    }
+    if amounts["mandate_fee"]:
+        # The paid period starts when the mandate's first debit clears, not
+        # now — installation alone buys no subscription time. Until then the
+        # vendor is active so they can reach the dashboard and set autopay up.
+        fields["renews_at"] = now
+    else:
+        fields["renews_at"] = _next_renewal(vendor["plan"], now)
+    db.update_vendor(vendor["id"], fields)
     db.log_activity("admin", "vendor_activated",
                     f"first payment recorded (total {amounts['total']}), "
                     f"credentials generated", vendor_id=vendor["id"])
