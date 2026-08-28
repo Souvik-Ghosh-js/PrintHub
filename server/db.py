@@ -84,6 +84,8 @@ CREATE TABLE IF NOT EXISTS vendors (
     cashfree_app_id TEXT, cashfree_secret_key TEXT,
     cashfree_webhook_secret TEXT,
     cashfree_env TEXT NOT NULL DEFAULT 'production',
+    autopay_subscription_id TEXT, autopay_status TEXT,
+    autopay_next_charge TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS payments (
@@ -137,6 +139,9 @@ _SQLITE_MIGRATIONS = [
     "ALTER TABLE print_jobs ADD COLUMN claimed_at TEXT",
     "ALTER TABLE print_jobs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE gateway_orders ADD COLUMN meta TEXT",
+    "ALTER TABLE vendors ADD COLUMN autopay_subscription_id TEXT",
+    "ALTER TABLE vendors ADD COLUMN autopay_status TEXT",
+    "ALTER TABLE vendors ADD COLUMN autopay_next_charge TEXT",
 ]
 
 
@@ -239,6 +244,14 @@ def get_vendor_by_login(login_id):
 
 def get_vendor_by_code(shop_code):
     rows = query("SELECT * FROM vendors WHERE shop_code = %s", (shop_code,))
+    return rows[0] if rows else None
+
+
+def get_vendor_by_autopay(subscription_id):
+    if not subscription_id:
+        return None
+    rows = query("SELECT * FROM vendors WHERE autopay_subscription_id = %s",
+                 (subscription_id,))
     return rows[0] if rows else None
 
 

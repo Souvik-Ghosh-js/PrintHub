@@ -190,6 +190,14 @@
     <p class="muted">{{ plans[vendor.plan].label }} · ₹{{ plans[vendor.plan].fee }} per
       {{ 'month' if vendor.plan == 'monthly' else 'year' }}
       {% if vendor.renews_at %}· renews {{ vendor.renews_at }}{% endif %}</p>
+    {% if days_left is not none and days_left >= 0 and days_left <= 7
+          and vendor.status == 'active' %}
+      <div class="note note-warn" style="margin-bottom:.8rem;">
+        <strong>Renewal due {{ 'today' if days_left == 0 else
+          'in ' ~ days_left ~ ' day' ~ ('' if days_left == 1 else 's') }}</strong>
+        — ₹{{ renewal_amount }} keeps your shop online. Renew below so your
+        customers are never turned away.</div>
+    {% endif %}
     {% if vendor.status == 'grace' %}
       <div class="note note-warn" style="margin-bottom:.8rem;">
         Payment overdue — you're in the grace period until {{ vendor.grace_until }}.
@@ -198,9 +206,47 @@
       <div class="note note-bad" style="margin-bottom:.8rem;">
         Your shop is offline. Renew to restore service.</div>
     {% endif %}
-    <form method="post" action="{{ url_for('vendor_renew_online') }}">
+    <form method="post" action="{{ url_for('vendor_renew_online') }}"
+          style="display:inline;">
       <button type="submit" class="btn btn-success">Renew now — ₹{{ plans[vendor.plan].fee }}</button>
     </form>
+
+    <!-- autopay -->
+    <div style="margin-top:1rem; padding-top:1rem; border-top:1px solid var(--line);">
+      {% if autopay_on %}
+        <div class="row-between" style="flex-wrap:wrap; gap:.6rem;">
+          <div>
+            <span class="pill pill-ok">autopay on</span>
+            <span class="muted tiny">
+              ₹{{ plans[vendor.plan].fee }} is debited automatically each
+              {{ 'month' if vendor.plan == 'monthly' else 'year' }}{% if vendor.autopay_next_charge %} ·
+              next {{ vendor.autopay_next_charge[:10] }}{% endif %}.
+            </span>
+          </div>
+          <form method="post" action="{{ url_for('vendor_autopay_cancel') }}"
+                style="margin:0;">
+            <button type="submit" class="btn btn-ghost btn-sm">Turn off</button>
+          </form>
+        </div>
+      {% elif autopay_pending %}
+        <span class="pill pill-warn">autopay pending</span>
+        <span class="muted tiny">Waiting for your bank to confirm the mandate.
+          Refresh in a few minutes.</span>
+      {% else %}
+        <div class="row-between" style="flex-wrap:wrap; gap:.6rem;">
+          <div>
+            <strong style="font-size:.92rem;">Never lose a day to a missed renewal</strong>
+            <div class="muted tiny">Approve once in your UPI app and
+              ₹{{ plans[vendor.plan].fee }} is paid automatically each
+              {{ 'month' if vendor.plan == 'monthly' else 'year' }}. Cancel any time.</div>
+          </div>
+          <form method="post" action="{{ url_for('vendor_autopay_start') }}"
+                style="margin:0;">
+            <button type="submit" class="btn btn-primary btn-sm">Turn on autopay</button>
+          </form>
+        </div>
+      {% endif %}
+    </div>
   {% endif %}
 </div>
 

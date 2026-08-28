@@ -15,7 +15,7 @@ import os
 import re
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 
 from flask import (Flask, request, jsonify, render_template, send_file,
@@ -27,6 +27,7 @@ from PIL import Image
 
 import billing
 import cashfree
+import cashfree_subs
 import config
 import db
 import docscan
@@ -999,6 +1000,12 @@ def vendor_dashboard(vendor):
         plans=config.PLANS, worker_exe=worker_exe_available(),
         has_gateway=has_gateway, has_prices=has_prices, stats=stats,
         live=billing.has_access(vendor) and has_gateway and has_prices,
+        days_left=billing.days_until_renewal(vendor),
+        autopay_on=(vendor.get("autopay_status") or "").upper() == "ACTIVE",
+        autopay_pending=(vendor.get("autopay_status") or "").upper()
+                        in ("INITIALIZED", "BANK_APPROVAL_PENDING"),
+        renewal_amount=(billing.renewal_amount(vendor["plan"])
+                        if vendor["plan"] != "lifetime" else 0),
         shop_url=f"{base}/{vendor['shop_code']}",
         webhook_url=f"{base}/payment/webhook/vendor")
 
@@ -1102,6 +1109,179 @@ def _start_subscription_checkout(vendor, purpose):
                            order_id=order_id, purpose=purpose,
                            payment_session_id=result["payment_session_id"],
                            cf_env=config.PLATFORM_CASHFREE_ENV), None
+
+
+# ===========================================================================
+# Autopay — the vendor authorises a mandate once and Cashfree debits each
+# cycle by itself (plan_type PERIODIC). We never schedule or raise a charge.
+# ===========================================================================
+AUTOPAY_INTERVAL = {"monthly": ("MONTH", 1), "yearly": ("YEAR", 1)}
+
+
+@app.route("/vendor/autopay/start", methods=["POST"])
+@vendor_required
+def vendor_autopay_start(vendor):
+    """Create the mandate and send the vendor to Cashfree to approve it."""
+    if vendor["plan"] == "lifetime":
+        flash("Lifetime plans have nothing to renew — autopay is not needed.")
+        return redirect(url_for("vendor_dashboard"))
+    if vendor["plan"] not in AUTOPAY_INTERVAL:
+        flash("Autopay is not available for this plan.")
+        return redirect(url_for("vendor_dashboard"))
+    if not cashfree.configured(config.PLATFORM_CASHFREE_APP_ID,
+                               config.PLATFORM_CASHFREE_SECRET_KEY):
+        flash("Autopay is not available yet — please renew manually.")
+        return redirect(url_for("vendor_dashboard"))
+
+    amount = billing.renewal_amount(vendor["plan"])
+    if amount > cashfree_subs.UPI_AUTOPAY_NO_AFA_LIMIT:
+        flash(f"₹{amount} is above the ₹{cashfree_subs.UPI_AUTOPAY_NO_AFA_LIMIT} "
+              f"UPI Autopay limit — please renew manually each period.")
+        return redirect(url_for("vendor_dashboard"))
+
+    interval_type, intervals = AUTOPAY_INTERVAL[vendor["plan"]]
+    sub_id = f"PHSUB_{vendor['id']}_{int(time.time())}"
+    # The mandate should start charging when the CURRENT period ends, so the
+    # vendor is never billed twice for the same month.
+    first_charge = None
+    if vendor.get("renews_at"):
+        r = vendor["renews_at"]
+        if isinstance(r, str):
+            try:
+                r = datetime.fromisoformat(r)
+            except ValueError:
+                r = None
+        # Cashfree requires a future date; leave a day's margin.
+        if r and r > datetime.now() + timedelta(days=1):
+            first_charge = r.strftime("%Y-%m-%dT%H:%M:%S+05:30")
+
+    res = cashfree_subs.create_subscription(
+        config.PLATFORM_CASHFREE_APP_ID,
+        config.PLATFORM_CASHFREE_SECRET_KEY,
+        config.PLATFORM_CASHFREE_ENV,
+        subscription_id=sub_id,
+        amount=amount,
+        interval_type=interval_type,
+        intervals=intervals,
+        customer_email=vendor.get("email"),
+        customer_phone=vendor.get("phone"),
+        return_url=f"{request.url_root}vendor/autopay/return",
+        first_charge_time=first_charge,
+        note=f"PrintHub {vendor['plan']} renewal for {vendor['shop_name']}",
+    )
+    if not res["success"] or not res.get("session_id"):
+        flash(f"Could not start autopay: {res.get('error', 'unknown error')}")
+        return redirect(url_for("vendor_dashboard"))
+
+    db.update_vendor(vendor["id"], {
+        "autopay_subscription_id": res["subscription_id"],
+        "autopay_status": res.get("status") or "INITIALIZED",
+    })
+    db.log_activity("vendor", "autopay_started",
+                    f"mandate {res['subscription_id']} for ₹{amount} "
+                    f"per {interval_type.lower()}", vendor_id=vendor["id"])
+    return render_template("autopay.html", vendor=vendor, amount=amount,
+                           interval=interval_type.lower(),
+                           session_id=res["session_id"],
+                           cf_env=config.PLATFORM_CASHFREE_ENV,
+                           first_charge=first_charge)
+
+
+@app.route("/vendor/autopay/return")
+@vendor_required
+def vendor_autopay_return(vendor):
+    """Where Cashfree sends the vendor after they approve the mandate. The
+    webhook is authoritative; this just reports what the API says now."""
+    sub_id = vendor.get("autopay_subscription_id")
+    status = None
+    if sub_id:
+        d = cashfree_subs.fetch_subscription(
+            config.PLATFORM_CASHFREE_APP_ID,
+            config.PLATFORM_CASHFREE_SECRET_KEY,
+            config.PLATFORM_CASHFREE_ENV, sub_id) or {}
+        status = (d.get("subscription_status") or "").upper()
+        if status:
+            db.update_vendor(vendor["id"], {
+                "autopay_status": status,
+                "autopay_next_charge": d.get("next_schedule_date"),
+            })
+    if status == "ACTIVE":
+        flash("Autopay is on — your renewal will be paid automatically.")
+    elif status in ("BANK_APPROVAL_PENDING", "INITIALIZED"):
+        flash("Autopay is being confirmed by your bank. This can take a "
+              "little while; the dashboard will update on its own.")
+    else:
+        flash("Autopay was not set up. You can try again or keep renewing "
+              "manually.")
+    return redirect(url_for("vendor_dashboard"))
+
+
+@app.route("/vendor/autopay/cancel", methods=["POST"])
+@vendor_required
+def vendor_autopay_cancel(vendor):
+    sub_id = vendor.get("autopay_subscription_id")
+    if sub_id:
+        cashfree_subs.cancel_subscription(
+            config.PLATFORM_CASHFREE_APP_ID,
+            config.PLATFORM_CASHFREE_SECRET_KEY,
+            config.PLATFORM_CASHFREE_ENV, sub_id)
+        db.log_activity("vendor", "autopay_cancelled", f"mandate {sub_id}",
+                        vendor_id=vendor["id"])
+    db.update_vendor(vendor["id"], {"autopay_status": "CANCELLED",
+                                    "autopay_next_charge": None})
+    flash("Autopay turned off. Remember to renew manually before your "
+          "subscription expires.")
+    return redirect(url_for("vendor_dashboard"))
+
+
+@app.route("/payment/webhook/autopay", methods=["POST"])
+def autopay_webhook():
+    """Cashfree tells us about mandate authorisation and every automatic
+    debit. A successful recurring charge extends the subscription exactly as
+    a manual renewal would."""
+    raw = request.get_data(as_text=True)
+    if not cashfree.verify_webhook(config.PLATFORM_CASHFREE_WEBHOOK_SECRET,
+                                   request.headers, raw):
+        print("[webhook/autopay] REJECTED: bad signature")
+        return jsonify({"error": "invalid signature"}), 401
+
+    ev = cashfree_subs.parse_webhook(raw)
+    sub_id = ev.get("subscription_id")
+    if not sub_id:
+        return jsonify({"status": "ignored"}), 200
+    vendor = db.get_vendor_by_autopay(sub_id)
+    if not vendor:
+        print(f"[webhook/autopay] unknown subscription {sub_id}")
+        return jsonify({"status": "unknown subscription"}), 200
+
+    fields = {}
+    if ev.get("subscription_status"):
+        fields["autopay_status"] = ev["subscription_status"]
+    if ev.get("next_schedule_date"):
+        fields["autopay_next_charge"] = ev["next_schedule_date"]
+
+    etype = ev.get("type")
+    if etype == cashfree_subs.EVENT_AUTH:
+        ok = ev.get("authorization_status") in ("SUCCESS", "ACTIVE")
+        fields["autopay_status"] = "ACTIVE" if ok else "AUTH_FAILED"
+        db.log_activity("system", "autopay_authorised" if ok else "autopay_auth_failed",
+                        f"mandate {sub_id}", vendor_id=vendor["id"])
+    elif etype == cashfree_subs.EVENT_PAID and ev.get("payment_status") == "SUCCESS":
+        # The whole point: an automatic debit renews the subscription.
+        billing.record_renewal_payment(vendor, method="autopay",
+                                       reference=str(ev.get("payment_id") or sub_id))
+        db.log_activity("system", "autopay_charged",
+                        f"₹{ev.get('payment_amount')} debited automatically "
+                        f"(mandate {sub_id})", vendor_id=vendor["id"])
+    elif etype == cashfree_subs.EVENT_FAILED:
+        db.log_activity("system", "autopay_failed",
+                        f"automatic debit failed: "
+                        f"{ev.get('failure_reason') or 'unknown'} — the vendor "
+                        f"must renew manually", vendor_id=vendor["id"])
+
+    if fields:
+        db.update_vendor(vendor["id"], fields)
+    return jsonify({"status": "ok"})
 
 
 @app.route("/pay/onboard/<code>")
@@ -1270,6 +1450,13 @@ def worker_jobs():
     except Exception as e:
         print(f"[reconcile] {e}")
 
+    # Move expired subscriptions into grace/suspended even for shops whose
+    # owners never open the dashboard.
+    try:
+        billing.sweep_subscriptions()
+    except Exception as e:
+        print(f"[sweep] {e}")
+
     # Give back any job whose worker vanished mid-print, then take out of
     # circulation anything that has already been tried too many times.
     db.release_stale_claims()
@@ -1404,6 +1591,7 @@ def admin_logout():
 @app.route("/admin")
 @admin_required
 def admin_panel():
+    billing.sweep_subscriptions()
     vendors = [billing.refresh_status(v) for v in db.list_vendors()]
     payments = db.list_payments(limit=100)
     activity = db.list_activity(limit=150)

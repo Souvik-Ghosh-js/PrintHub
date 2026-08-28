@@ -55,6 +55,12 @@ CREATE TABLE IF NOT EXISTS vendors (
     cashfree_webhook_secret VARCHAR(128),
     cashfree_env            VARCHAR(16) NOT NULL DEFAULT 'production',  -- production|sandbox
 
+    -- Autopay mandate (Cashfree Subscriptions). Cashfree holds the mandate;
+    -- we only remember which subscription belongs to this vendor.
+    autopay_subscription_id VARCHAR(128),
+    autopay_status          VARCHAR(32),
+    autopay_next_charge     VARCHAR(64),
+
     created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uq_shop_code (shop_code),
@@ -156,3 +162,7 @@ CREATE TABLE IF NOT EXISTS gateway_orders (
 --   ALTER TABLE print_jobs
 --     ADD COLUMN order_id VARCHAR(128), ADD COLUMN transaction_id VARCHAR(128),
 --     ADD COLUMN paid_at DATETIME, ADD KEY idx_order (order_id);
+--   ALTER TABLE vendors
+--     ADD COLUMN autopay_subscription_id VARCHAR(128),
+--     ADD COLUMN autopay_status VARCHAR(32),
+--     ADD COLUMN autopay_next_charge VARCHAR(64);

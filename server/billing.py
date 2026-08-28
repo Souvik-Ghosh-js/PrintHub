@@ -147,6 +147,48 @@ def refresh_status(vendor):
     return vendor
 
 
+def days_until_renewal(vendor):
+    """Whole days until the subscription renews. None for lifetime/unknown,
+    negative once it is overdue."""
+    if not vendor or vendor.get("plan") == "lifetime":
+        return None
+    r = vendor.get("renews_at")
+    if not r:
+        return None
+    if isinstance(r, str):
+        try:
+            r = datetime.fromisoformat(r)
+        except ValueError:
+            return None
+    return (r.date() - datetime.now().date()).days
+
+
+def sweep_subscriptions():
+    """Apply the state machine to EVERY vendor, not just the one being viewed.
+
+    refresh_status() only runs when a vendor's own page or worker touches
+    their row, so a shop that stops logging in would never move to grace or
+    suspended. This sweep is called from the worker poll and the admin panel
+    so expiry is enforced platform-wide. Returns how many rows changed.
+    """
+    changed = 0
+    try:
+        vendors = db.list_vendors()
+    except Exception as e:
+        print(f"[sweep] could not list vendors: {e}")
+        return 0
+    for v in vendors:
+        before = v.get("status")
+        try:
+            after = refresh_status(v)
+        except Exception as e:
+            print(f"[sweep] vendor {v.get('id')}: {e}")
+            continue
+        if after and after.get("status") != before:
+            changed += 1
+    return changed
+
+
 def has_access(vendor) -> bool:
     """Vendors keep platform access while active or in grace (spec §8.3)."""
     return bool(vendor) and vendor["status"] in ("active", "grace")

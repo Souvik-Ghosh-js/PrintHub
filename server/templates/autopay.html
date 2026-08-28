@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Set up autopay — PrintHub{% endblock %}
+{% block wrapclass %}wrap-tight{% endblock %}
+{% block head %}<script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>{% endblock %}
+{% block nav %}<a href="{{ url_for('vendor_dashboard') }}">Back to dashboard</a>{% endblock %}
+
+{% block content %}
+<div class="card" style="margin-top:2rem;">
+  <h1 style="margin-bottom:.2rem;">Turn on autopay</h1>
+  <p class="muted">{{ vendor.shop_name }} — {{ vendor.plan }} plan</p>
+
+  <div style="background:var(--surface-2); border:1px solid var(--line);
+              border-radius:var(--r); padding:1rem; margin:1.1rem 0;">
+    <div class="row-between">
+      <span class="muted">Charged automatically</span>
+      <strong style="font-size:1.3rem;">₹{{ amount }} / {{ interval }}</strong>
+    </div>
+    {% if first_charge %}
+    <div class="row-between" style="margin-top:.5rem;">
+      <span class="muted">First automatic charge</span>
+      <span>{{ first_charge[:10] }}</span>
+    </div>
+    <p class="muted tiny" style="margin:.6rem 0 0;">Your current period is
+      already paid — autopay takes over when it ends, so you are never
+      charged twice.</p>
+    {% endif %}
+  </div>
+
+  <button id="approve" class="btn btn-success btn-block btn-lg">
+    Approve the mandate</button>
+
+  <p class="muted tiny" style="margin-top:1rem;">
+    You'll approve this once in your UPI app (or with your bank). After that
+    the renewal is paid on its own and your shop never goes offline for a
+    missed payment. You can cancel autopay any time from your dashboard, and
+    your bank will always notify you before each debit.</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const cf = new Cashfree({ mode: "{{ cf_env }}" });
+  document.getElementById("approve").addEventListener("click", (e) => {
+    e.target.disabled = true;
+    e.target.textContent = "Opening your UPI app…";
+    cf.subscriptionsCheckout({
+      subsSessionId: "{{ session_id }}",
+      redirectTarget: "_self",
+    }).catch(() => {
+      e.target.disabled = false;
+      e.target.textContent = "Approve the mandate";
+      alert("Could not open the approval screen. Please try again.");
+    });
+  });
+</script>
+{% endblock %}
