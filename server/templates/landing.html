@@ -144,13 +144,23 @@
   .cta-band .btn-light { background: #fff; color: var(--brand-700); }
   .cta-band .btn-light:hover { background: rgba(255,255,255,.9); }
 
-  .contact-card { display: flex; align-items: center; gap: .9rem; flex-wrap: wrap; }
+  /* Both cards must read as one row: icon, number, actions. Nothing wraps
+     until the card is genuinely too narrow, so the pair stays aligned. */
+  .contact-card { display: flex; align-items: center; gap: .9rem; }
   .contact-card .ico { width: 42px; height: 42px; border-radius: 12px; flex: none;
                        display: grid; place-items: center; font-size: 1.2rem;
                        background: var(--brand-50); }
   .contact-card .phone { font-size: 1.05rem; font-weight: 700; color: var(--ink);
-                         letter-spacing: -.01em; display: block; }
+                         letter-spacing: -.01em; display: block;
+                         white-space: nowrap; }
   .contact-card .phone:hover { color: var(--brand-600); text-decoration: none; }
+  .contact-card .btn-row { flex: none; margin-left: auto; }
+  /* Narrow phones: stack the actions under the number rather than squeezing. */
+  @media (max-width: 400px) {
+    .contact-card { flex-wrap: wrap; }
+    .contact-card .btn-row { margin-left: 0; width: 100%; }
+    .contact-card .btn-row .btn { flex: 1; }
+  }
 
   .shop-link { display: flex; align-items: center; gap: .85rem; padding: .9rem 1rem;
                border: 1px solid var(--line); border-radius: var(--r);
@@ -613,7 +623,7 @@
         <a class="phone" href="tel:{{ c.tel }}">{{ c.label }}</a>
         <div class="muted tiny">Call or WhatsApp</div>
       </div>
-      <div class="btn-row" style="flex-wrap:nowrap;">
+      <div class="btn-row">
         <a class="btn btn-primary btn-sm" href="tel:{{ c.tel }}">Call</a>
         <a class="btn btn-ghost btn-sm" target="_blank" rel="noopener"
            href="https://wa.me/{{ c.wa }}?text=Hi%2C%20I%20want%20to%20set%20up%20PrintHub%20at%20my%20print%20shop">

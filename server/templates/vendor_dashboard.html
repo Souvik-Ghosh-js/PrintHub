@@ -16,6 +16,8 @@
   .kv-row + .kv-row { margin-top: .4rem; }
   .kv-row .k { color: var(--muted); font-weight: 600; }
   .kv-row .v { text-align: right; }
+  .btn-xs { padding: .12rem .45rem; font-size: .72rem; line-height: 1.5;
+            vertical-align: middle; margin-left: .35rem; }
 </style>
 {% endblock %}
 
@@ -24,7 +26,9 @@
   <div>
     <h1 style="margin-bottom:.2rem;">{{ vendor.shop_name }}</h1>
     <p class="muted" style="margin:0;">
-      {% if live %}Live at <code>{{ shop_url }}</code>
+      {% if live %}Live at <code id="shopUrl">{{ shop_url }}</code>
+        <button type="button" class="btn btn-ghost btn-xs" id="copyShopUrl"
+                data-url="{{ shop_url }}">Copy</button>
       {% else %}Not accepting orders yet — finish the setup below{% endif %}
     </p>
   </div>
@@ -51,7 +55,7 @@
   <div class="stat"><div class="stat-label">Earned (paid)</div>
     <div class="stat-value">₹{{ '%.0f'|format(stats.revenue) }}</div></div>
   <div class="stat"><div class="stat-label">Plan</div>
-    <div class="stat-value" style="font-size:1.1rem;">{{ plans[vendor.plan].label }}</div></div>
+    <div class="stat-value is-text">{{ plans[vendor.plan].label }}</div></div>
 </div>
 
 <div class="grid2">
@@ -317,4 +321,19 @@
     </table>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    const btn = document.getElementById("copyShopUrl");
+    if (!btn) return;
+    btn.addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText(btn.dataset.url); } catch (e) { return; }
+      const was = btn.textContent;
+      btn.textContent = "Copied";
+      setTimeout(() => { btn.textContent = was; }, 1400);
+    });
+  })();
+</script>
 {% endblock %}

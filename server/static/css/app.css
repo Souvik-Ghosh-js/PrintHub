@@ -249,11 +249,16 @@ tbody tr:hover td { background: var(--surface-2); }
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
          gap: .75rem; }
 .stat { background: var(--surface); border: 1px solid var(--line);
-        border-radius: var(--r); padding: .9rem 1rem; }
+        border-radius: var(--r); padding: .9rem 1rem;
+        /* label pinned top, value pinned bottom, so a tile holding words
+           ("Lifetime") baselines with tiles holding numbers */
+        display: flex; flex-direction: column; justify-content: space-between; }
 .stat-label { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
               color: var(--muted); font-weight: 650; }
 .stat-value { font-size: 1.5rem; font-weight: 700; letter-spacing: -.02em;
-              margin-top: .15rem; }
+              margin-top: .15rem; line-height: 1.15; }
+/* A word-valued tile sits smaller but on the same baseline as the numbers. */
+.stat-value.is-text { font-size: 1.15rem; padding-bottom: .12rem; }
 
 /* ---------- modal ---------- */
 .modal {
