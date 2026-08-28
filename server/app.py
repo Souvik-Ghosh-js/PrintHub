@@ -98,7 +98,10 @@ def index():
     shops = [v for v in vendors
              if billing.has_access(v) and _vendor_gateway_ready(v)
              and float(v.get("price_bw") or 0) > 0]
-    return render_template("landing.html", shops=shops)
+    return render_template("landing.html", shops=shops,
+                           stats=db.platform_stats(),
+                           plans=config.PLANS,
+                           install_fee=config.INSTALLATION_FEE)
 
 
 def _vendor_gateway_ready(vendor) -> bool:

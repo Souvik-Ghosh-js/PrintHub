@@ -1,46 +1,146 @@
 {% extends "base.html" %}
-{% block title %}PrintHub — scan &amp; print at a shop near you{% endblock %}
-{% block wrapclass %}wrap-narrow{% endblock %}
-{% block nav %}<a href="{{ url_for('vendor_login') }}">Vendor sign in</a>{% endblock %}
+{% block title %}PrintHub — customers print straight from their phone{% endblock %}
+{% block wrapclass %}{% endblock %}
+{% block nav %}
+  <a href="#how">How it works</a>
+  <a href="#features">Features</a>
+  <a href="#pricing">Pricing</a>
+  <a href="{{ url_for('vendor_login') }}">Shop login</a>
+{% endblock %}
 
 {% block head %}
 <style>
-  .hero { text-align: center; padding: 1.6rem 0 .6rem; }
-  .hero h1 { font-size: 2rem; letter-spacing: -.03em; }
-  .hero p { color: var(--muted); max-width: 460px; margin: 0 auto; }
+  .sec { padding: 2.6rem 0 .4rem; }
+  .sec-head { text-align: center; max-width: 620px; margin: 0 auto 1.6rem; }
+  .sec-head h2 { font-size: 1.6rem; letter-spacing: -.02em; }
+  .sec-head p { color: var(--muted); margin: 0; }
+  .eyebrow { font-size: .72rem; font-weight: 700; letter-spacing: .1em;
+             text-transform: uppercase; color: var(--brand-600); margin-bottom: .4rem; }
+
+  /* ---------------- hero ---------------- */
+  .hero { text-align: center; padding: 1.8rem 0 .4rem; }
+  .hero h1 { font-size: 2.3rem; letter-spacing: -.035em; max-width: 780px;
+             margin: 0 auto .7rem; }
+  .hero h1 .hl { background: linear-gradient(120deg, var(--brand-500), var(--brand-700));
+                 -webkit-background-clip: text; background-clip: text;
+                 -webkit-text-fill-color: transparent; }
+  .hero p.sub { color: var(--muted); font-size: 1.05rem; max-width: 560px;
+                margin: 0 auto 1.2rem; }
+  .hero-cta { display: flex; gap: .6rem; justify-content: center; flex-wrap: wrap; }
+  .nowa { display: flex; gap: .45rem; justify-content: center; flex-wrap: wrap;
+          margin-top: 1rem; }
+  .nowa span { font-size: .76rem; font-weight: 600; color: var(--muted);
+               background: var(--surface-2); border: 1px solid var(--line);
+               border-radius: 999px; padding: .22rem .7rem; }
+  @media (max-width: 640px) { .hero h1 { font-size: 1.75rem; } }
+
+  /* ---------------- live stats ---------------- */
+  .statbar { display: grid; grid-template-columns: repeat(4, 1fr); gap: .7rem;
+             margin: 1.6rem 0 .4rem; }
+  @media (max-width: 640px) { .statbar { grid-template-columns: repeat(2, 1fr); } }
+  .statbox { text-align: center; background: var(--surface); border: 1px solid var(--line);
+             border-radius: var(--r); padding: .9rem .6rem; }
+  .statbox .v { font-size: 1.6rem; font-weight: 750; letter-spacing: -.03em;
+                color: var(--brand-600); }
+  .statbox .k { font-size: .74rem; color: var(--muted); font-weight: 600; }
+  .live { display: inline-flex; align-items: center; gap: .35rem; font-size: .7rem;
+          color: var(--muted); margin-top: .5rem; }
+  .live i { width: 7px; height: 7px; border-radius: 50%; background: var(--ok);
+            display: inline-block; animation: blip 1.8s ease-in-out infinite; }
+  @keyframes blip { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
 
   /* ---------------- animated explainer ---------------- */
-  .demo {
-    position: relative; background: var(--surface); border: 1px solid var(--line);
-    border-radius: var(--r-lg); padding: 1.1rem 1rem .9rem; margin: 1.4rem 0 1rem;
-    box-shadow: var(--shadow-sm); overflow: hidden;
-  }
+  .demo { position: relative; background: var(--surface); border: 1px solid var(--line);
+          border-radius: var(--r-lg); padding: 1.1rem 1rem .9rem; margin: 1.4rem 0 0;
+          box-shadow: var(--shadow-sm); overflow: hidden; }
   .demo-stage { width: 100%; max-width: 460px; margin: 0 auto; display: block; }
-
-  /* step captions under the scene */
   .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: .4rem;
            margin-top: .9rem; }
   .step-t { text-align: center; padding: .5rem .3rem; border-radius: var(--r-sm);
-            border: 1px solid transparent; transition: background .3s, border-color .3s,
-            color .3s, transform .3s; }
-  .step-t .n { font-size: .68rem; font-weight: 700; letter-spacing: .06em;
+            border: 1px solid transparent;
+            transition: background .3s, border-color .3s, color .3s, transform .3s; }
+  .step-t .n { font-size: .66rem; font-weight: 700; letter-spacing: .06em;
                text-transform: uppercase; color: var(--muted); }
-  .step-t .l { font-size: .82rem; font-weight: 650; color: var(--ink-2); }
+  .step-t .l { font-size: .8rem; font-weight: 650; color: var(--ink-2); }
   .step-t.on { background: var(--brand-50); border-color: var(--brand-300);
                transform: translateY(-2px); }
-  .step-t.on .n { color: var(--brand-600); }
-  .step-t.on .l { color: var(--brand-700); }
-  @media (max-width: 520px) {
-    .steps { grid-template-columns: repeat(2, 1fr); }
-    .hero h1 { font-size: 1.55rem; }
-  }
-
+  .step-t.on .n { color: var(--brand-600); } .step-t.on .l { color: var(--brand-700); }
+  @media (max-width: 520px) { .steps { grid-template-columns: repeat(2, 1fr); } }
   .replay { position: absolute; top: .7rem; right: .8rem; font-size: .72rem;
             color: var(--muted); background: var(--surface-2); border: 1px solid var(--line);
             border-radius: 999px; padding: .18rem .6rem; cursor: pointer; }
   .replay:hover { color: var(--brand-600); border-color: var(--brand-300); }
 
-  /* ---------------- shops ---------------- */
+  /* ---------------- generic grids ---------------- */
+  .g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: .9rem; }
+  .g2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: .9rem; }
+  @media (max-width: 780px) { .g3 { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 560px) { .g3, .g2 { grid-template-columns: 1fr; } }
+
+  .feat { background: var(--surface); border: 1px solid var(--line);
+          border-radius: var(--r); padding: 1rem; }
+  .feat .ico { width: 36px; height: 36px; border-radius: 10px; display: grid;
+               place-items: center; font-size: 1.1rem; background: var(--brand-50);
+               margin-bottom: .55rem; }
+  .feat h3 { margin: 0 0 .25rem; font-size: .95rem; }
+  .feat p { margin: 0; color: var(--muted); font-size: .85rem; }
+
+  /* ---------------- before / after ---------------- */
+  .cmp { width: 100%; border-collapse: separate; border-spacing: 0; font-size: .88rem; }
+  .cmp th, .cmp td { padding: .7rem .8rem; text-align: left;
+                     border-bottom: 1px solid var(--line); }
+  .cmp thead th { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em;
+                  color: var(--muted); background: var(--surface-2); }
+  .cmp td.old { color: var(--muted); }
+  .cmp td.new { color: var(--ink); font-weight: 600; }
+  .cmp td.new::before { content: "✓ "; color: var(--ok); font-weight: 700; }
+
+  /* ---------------- calculator ---------------- */
+  .calc-row { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end; }
+  .calc-row .field { flex: 1 1 130px; }
+  .calc-out { background: var(--brand-50); border: 1px solid var(--brand-300);
+              border-radius: var(--r); padding: 1rem; text-align: center; margin-top: 1rem; }
+  .calc-out .big { font-size: 2rem; font-weight: 750; color: var(--brand-700);
+                   letter-spacing: -.03em; }
+
+  /* ---------------- pricing ---------------- */
+  .plans { display: grid; grid-template-columns: repeat(3, 1fr); gap: .9rem; }
+  @media (max-width: 780px) { .plans { grid-template-columns: 1fr; } }
+  .plan { position: relative; background: var(--surface); border: 1.5px solid var(--line);
+          border-radius: var(--r); padding: 1.2rem; display: flex; flex-direction: column; }
+  .plan.best { border-color: var(--brand-600); box-shadow: var(--shadow); }
+  .plan .tag { position: absolute; top: -10px; left: 50%; transform: translateX(-50%);
+               background: var(--brand-600); color: #fff; font-size: .68rem;
+               font-weight: 700; padding: .15rem .7rem; border-radius: 999px;
+               letter-spacing: .04em; white-space: nowrap; }
+  .plan .amt { font-size: 2rem; font-weight: 750; letter-spacing: -.03em; }
+  .plan .per { color: var(--muted); font-size: .82rem; }
+  .plan ul { list-style: none; padding: 0; margin: .9rem 0; flex: 1; }
+  .plan li { font-size: .85rem; padding: .28rem 0 .28rem 1.3rem; position: relative;
+             color: var(--ink-2); }
+  .plan li::before { content: "✓"; position: absolute; left: 0; color: var(--ok);
+                     font-weight: 700; }
+
+  /* ---------------- faq ---------------- */
+  details.faq { background: var(--surface); border: 1px solid var(--line);
+                border-radius: var(--r-sm); padding: .8rem 1rem; margin-bottom: .5rem; }
+  details.faq summary { cursor: pointer; font-weight: 620; font-size: .92rem;
+                        list-style: none; }
+  details.faq summary::-webkit-details-marker { display: none; }
+  details.faq summary::after { content: "+"; float: right; color: var(--muted);
+                               font-weight: 700; }
+  details.faq[open] summary::after { content: "−"; }
+  details.faq p { margin: .6rem 0 0; color: var(--muted); font-size: .88rem; }
+
+  .cta-band { background: linear-gradient(135deg, var(--brand-600), var(--brand-700));
+              border-radius: var(--r-lg); padding: 2rem 1.4rem; text-align: center;
+              color: #fff; margin: 2.4rem 0 1rem; }
+  .cta-band h2 { color: #fff; margin-bottom: .4rem; }
+  .cta-band p { color: rgba(255,255,255,.85); margin-bottom: 1.1rem; }
+  .cta-band .btn-ghost { background: rgba(255,255,255,.14); color: #fff;
+                         border-color: rgba(255,255,255,.35); }
+  .cta-band .btn-ghost:hover { background: rgba(255,255,255,.24); }
+
   .shop-link { display: flex; align-items: center; gap: .85rem; padding: .9rem 1rem;
                border: 1px solid var(--line); border-radius: var(--r);
                background: var(--surface); color: inherit; margin-bottom: .6rem;
@@ -51,78 +151,100 @@
               display: grid; place-items: center; color: #fff; font-size: 1.1rem;
               background: linear-gradient(135deg, var(--brand-500), var(--brand-700)); }
 
-  /* ---------------- scene elements ---------------- */
+  /* ---------------- scene ---------------- */
   .sc { transition: opacity .45s ease, transform .45s ease; }
   .sc-hidden { opacity: 0; }
-  #ph-body { transition: transform .5s cubic-bezier(.34,1.3,.5,1); }
-  #scanline { transform-origin: center; }
-  #paper1, #paper2 { transition: transform .8s cubic-bezier(.3,.8,.4,1), opacity .4s; }
-  #tick circle { transition: opacity .3s; }
+  #paper1 { transition: transform .8s cubic-bezier(.3,.8,.4,1), opacity .4s; }
   #tick path { stroke-dasharray: 26; stroke-dashoffset: 26;
                transition: stroke-dashoffset .45s ease .1s; }
   #tick.on path { stroke-dashoffset: 0; }
   .pulse { animation: pulse 1.6s ease-in-out infinite; transform-origin: center; }
   @keyframes pulse { 0%,100% { opacity:.25 } 50% { opacity:.7 } }
   @media (prefers-reduced-motion: reduce) {
-    .sc, #ph-body, #paper1, #paper2, #tick path { transition: none !important; }
-    .pulse { animation: none; }
+    .sc, #paper1, #tick path { transition: none !important; }
+    .pulse, .live i { animation: none; }
   }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="hero">
-  <h1>Print anything, straight from your phone</h1>
-  <p>Scan the QR at the counter, snap your document, pay — it prints while
-    you wait. No app, no login, no queue.</p>
-</div>
-
 {% if error %}<div class="note note-warn" style="margin-bottom:1rem;">{{ error }}</div>{% endif %}
 
-<!-- ================= animated explainer ================= -->
-<div class="demo">
-  <button type="button" class="replay" id="replay">↻ Replay</button>
-  <svg class="demo-stage" viewBox="0 0 460 230" role="img"
-       aria-label="Animation: scan the QR code, photograph your document, pay, and it prints">
-    <defs>
-      <linearGradient id="gBrand" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#4338ca"/>
-      </linearGradient>
-      <clipPath id="slotClip"><rect x="300" y="146" width="120" height="56"/></clipPath>
-    </defs>
+<!-- ==================== HERO ==================== -->
+<div class="hero">
+  <div class="eyebrow">For print shops &amp; cyber cafés</div>
+  <h1>Your customer's phone, <span class="hl">straight to your printer</span></h1>
+  <p class="sub">Stick a QR code on your counter. Customers scan, upload, pay —
+    and the job prints itself. No WhatsApp, no pen drives, no copying files.</p>
+  <div class="hero-cta">
+    <a class="btn btn-primary btn-lg" href="#pricing">See pricing</a>
+    <a class="btn btn-ghost btn-lg" href="#how">How it works</a>
+  </div>
+  <div class="nowa">
+    <span>No WhatsApp</span><span>No pen drive</span><span>No virus risk</span>
+    <span>Money straight to your account</span>
+  </div>
+</div>
 
-    <!-- ---------- QR poster on the counter ---------- -->
-    <g id="qr-card" class="sc">
-      <rect x="18" y="52" width="86" height="104" rx="9"
-            fill="var(--surface)" stroke="var(--line)" stroke-width="2"/>
-      <rect x="18" y="52" width="86" height="20" rx="9" fill="url(#gBrand)"/>
-      <rect x="18" y="63" width="86" height="9" fill="url(#gBrand)"/>
-      <text x="61" y="66" text-anchor="middle" fill="#fff"
-            font-size="8" font-weight="700" font-family="inherit">SCAN TO PRINT</text>
-      <!-- qr blocks -->
-      <g fill="var(--ink)">
-        <rect x="32" y="80" width="16" height="16" rx="2"/>
-        <rect x="74" y="80" width="16" height="16" rx="2"/>
-        <rect x="32" y="122" width="16" height="16" rx="2"/>
-        <rect x="55" y="82" width="5" height="5"/><rect x="62" y="89" width="5" height="5"/>
-        <rect x="55" y="96" width="5" height="5"/><rect x="69" y="103" width="5" height="5"/>
-        <rect x="55" y="110" width="5" height="5"/><rect x="62" y="117" width="5" height="5"/>
-        <rect x="76" y="110" width="5" height="5"/><rect x="69" y="124" width="5" height="5"/>
-        <rect x="83" y="124" width="5" height="5"/><rect x="76" y="131" width="5" height="5"/>
+<!-- ==================== LIVE STATS ==================== -->
+<div class="statbar">
+  <div class="statbox"><div class="v">{{ stats.shops }}</div>
+    <div class="k">Shops running</div></div>
+  <div class="statbox"><div class="v">{{ "{:,}".format(stats.documents) }}</div>
+    <div class="k">Documents printed</div></div>
+  <div class="statbox"><div class="v">{{ "{:,}".format(stats.pages) }}</div>
+    <div class="k">Pages printed</div></div>
+  <div class="statbox"><div class="v">₹{{ "{:,.0f}".format(stats.paid_to_shops) }}</div>
+    <div class="k">Paid to shop owners</div></div>
+</div>
+<p class="center"><span class="live"><i></i> Live from the platform — not marketing numbers</span></p>
+
+<!-- ==================== ANIMATED EXPLAINER ==================== -->
+<div class="sec" id="how">
+  <div class="sec-head">
+    <div class="eyebrow">How it works</div>
+    <h2>Four steps, about a minute</h2>
+    <p>Your customer never installs anything. You never touch their files.</p>
+  </div>
+
+  <div class="demo">
+    <button type="button" class="replay" id="replay">↻ Replay</button>
+    <svg class="demo-stage" viewBox="0 0 460 230" role="img"
+         aria-label="Animation: the customer scans the QR code, photographs the document, pays, and it prints">
+      <defs>
+        <linearGradient id="gBrand" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#4338ca"/>
+        </linearGradient>
+        <clipPath id="slotClip"><rect x="300" y="146" width="120" height="56"/></clipPath>
+      </defs>
+
+      <g id="qr-card" class="sc">
+        <rect x="18" y="52" width="86" height="104" rx="9"
+              fill="var(--surface)" stroke="var(--line)" stroke-width="2"/>
+        <rect x="18" y="52" width="86" height="20" rx="9" fill="url(#gBrand)"/>
+        <rect x="18" y="63" width="86" height="9" fill="url(#gBrand)"/>
+        <text x="61" y="66" text-anchor="middle" fill="#fff"
+              font-size="8" font-weight="700" font-family="inherit">SCAN TO PRINT</text>
+        <g fill="var(--ink)">
+          <rect x="32" y="80" width="16" height="16" rx="2"/>
+          <rect x="74" y="80" width="16" height="16" rx="2"/>
+          <rect x="32" y="122" width="16" height="16" rx="2"/>
+          <rect x="55" y="82" width="5" height="5"/><rect x="62" y="89" width="5" height="5"/>
+          <rect x="55" y="96" width="5" height="5"/><rect x="69" y="103" width="5" height="5"/>
+          <rect x="55" y="110" width="5" height="5"/><rect x="62" y="117" width="5" height="5"/>
+          <rect x="76" y="110" width="5" height="5"/><rect x="69" y="124" width="5" height="5"/>
+          <rect x="83" y="124" width="5" height="5"/><rect x="76" y="131" width="5" height="5"/>
+        </g>
+        <rect x="18" y="52" width="86" height="104" rx="9" fill="none"
+              stroke="var(--brand-500)" stroke-width="2" class="pulse"/>
       </g>
-      <rect x="18" y="52" width="86" height="104" rx="9" fill="none"
-            stroke="var(--brand-500)" stroke-width="2" class="pulse"/>
-    </g>
 
-    <!-- ---------- phone ---------- -->
-    <g id="phone">
       <g id="ph-body">
         <rect x="168" y="30" width="112" height="170" rx="16"
               fill="var(--surface)" stroke="var(--ink-2)" stroke-width="2.5"/>
         <rect x="176" y="42" width="96" height="146" rx="8" fill="var(--surface-2)"/>
         <rect x="208" y="34" width="32" height="5" rx="2.5" fill="var(--ink-2)"/>
 
-        <!-- screen 1: camera scanning the QR -->
         <g id="s-scan" class="sc">
           <rect x="192" y="66" width="64" height="64" rx="6" fill="none"
                 stroke="var(--brand-500)" stroke-width="2" stroke-dasharray="14 10"/>
@@ -139,7 +261,6 @@
                 font-size="9" font-family="inherit">Point at the code</text>
         </g>
 
-        <!-- screen 2: the captured document, auto-cropped -->
         <g id="s-doc" class="sc sc-hidden">
           <rect x="196" y="60" width="56" height="74" rx="4" fill="#fff"
                 stroke="var(--brand-500)" stroke-width="2"/>
@@ -151,7 +272,6 @@
             <rect x="203" y="104" width="26" height="3" rx="1.5"/>
             <rect x="203" y="116" width="20" height="12" rx="2" opacity=".8"/>
           </g>
-          <!-- corner handles -->
           <g fill="var(--brand-600)">
             <circle cx="196" cy="60" r="4"/><circle cx="252" cy="60" r="4"/>
             <circle cx="252" cy="134" r="4"/><circle cx="196" cy="134" r="4"/>
@@ -160,7 +280,6 @@
                 font-size="9" font-weight="650" font-family="inherit">Edges found ✨</text>
         </g>
 
-        <!-- screen 3: payment -->
         <g id="s-pay" class="sc sc-hidden">
           <rect x="190" y="66" width="68" height="44" rx="6" fill="url(#gBrand)"/>
           <rect x="190" y="78" width="68" height="7" fill="rgba(255,255,255,.35)"/>
@@ -171,7 +290,6 @@
                 font-size="9" font-family="inherit">UPI · card · wallet</text>
         </g>
 
-        <!-- screen 4: paid -->
         <g id="s-done" class="sc sc-hidden">
           <g id="tick">
             <circle cx="224" cy="95" r="26" fill="var(--ok-bg)"/>
@@ -184,13 +302,9 @@
                 font-size="9" font-family="inherit">Printing now…</text>
         </g>
       </g>
-    </g>
 
-    <!-- ---------- printer ---------- -->
-    <g id="printer">
-      <!-- sheets emerging (behind the printer body) -->
       <g clip-path="url(#slotClip)">
-        <g id="paper1" transform="translate(0,0)" opacity="0">
+        <g id="paper1" opacity="0">
           <rect x="330" y="148" width="60" height="52" rx="3" fill="#fff"
                 stroke="var(--line)" stroke-width="1.5"/>
           <g fill="var(--muted)" opacity=".5">
@@ -201,7 +315,6 @@
           </g>
         </g>
       </g>
-
       <rect x="300" y="96" width="120" height="58" rx="10" fill="var(--surface)"
             stroke="var(--ink-2)" stroke-width="2.5"/>
       <rect x="316" y="74" width="88" height="26" rx="5" fill="var(--surface-2)"
@@ -212,26 +325,253 @@
       <rect x="316" y="118" width="30" height="4" rx="2" fill="var(--line)"/>
       <text x="360" y="216" text-anchor="middle" fill="var(--muted)"
             font-size="9" font-family="inherit">Collect at the counter</text>
-    </g>
 
-    <!-- connection sparkle between phone and printer -->
-    <g id="link" class="sc sc-hidden">
-      <path d="M286 118 q14 -14 28 0" fill="none" stroke="var(--brand-500)"
-            stroke-width="2" stroke-dasharray="4 4" stroke-linecap="round"/>
-    </g>
-  </svg>
+      <g id="link" class="sc sc-hidden">
+        <path d="M286 118 q14 -14 28 0" fill="none" stroke="var(--brand-500)"
+              stroke-width="2" stroke-dasharray="4 4" stroke-linecap="round"/>
+      </g>
+    </svg>
 
-  <div class="steps">
-    <div class="step-t" data-step="0"><div class="n">Step 1</div><div class="l">Scan the QR</div></div>
-    <div class="step-t" data-step="1"><div class="n">Step 2</div><div class="l">Snap &amp; auto-fix</div></div>
-    <div class="step-t" data-step="2"><div class="n">Step 3</div><div class="l">Pay on your phone</div></div>
-    <div class="step-t" data-step="3"><div class="n">Step 4</div><div class="l">Collect the print</div></div>
+    <div class="steps">
+      <div class="step-t" data-step="0"><div class="n">Step 1</div><div class="l">Scan the QR</div></div>
+      <div class="step-t" data-step="1"><div class="n">Step 2</div><div class="l">Snap &amp; auto-fix</div></div>
+      <div class="step-t" data-step="2"><div class="n">Step 3</div><div class="l">Pay on the phone</div></div>
+      <div class="step-t" data-step="3"><div class="n">Step 4</div><div class="l">Collect the print</div></div>
+    </div>
   </div>
 </div>
 
+<!-- ==================== PROBLEM / SOLUTION ==================== -->
+<div class="sec">
+  <div class="sec-head">
+    <div class="eyebrow">Why change</div>
+    <h2>The counter, before and after</h2>
+    <p>Everything that slows a print shop down, removed.</p>
+  </div>
+  <div class="card" style="padding:0; overflow:hidden;">
+    <div class="table-scroll">
+      <table class="cmp">
+        <thead><tr><th>At the counter</th><th>Today</th><th>With PrintHub</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Getting the file</strong></td>
+              <td class="old">"WhatsApp kar do" — then find it in your chats</td>
+              <td class="new">Customer scans the QR and uploads it themselves</td></tr>
+          <tr><td><strong>Pen drives</strong></td>
+              <td class="old">Plug in an unknown drive, risk a virus</td>
+              <td class="new">Nothing is plugged into your PC, ever</td></tr>
+          <tr><td><strong>Taking payment</strong></td>
+              <td class="old">Count cash, or check if the UPI actually landed</td>
+              <td class="new">Paid online before it prints — no unpaid jobs</td></tr>
+          <tr><td><strong>Your time per job</strong></td>
+              <td class="old">Open the file, set options, hit print, repeat</td>
+              <td class="new">It prints by itself; you hand over the paper</td></tr>
+          <tr><td><strong>A queue of people</strong></td>
+              <td class="old">One customer at a time at your screen</td>
+              <td class="new">Everyone orders from their own phone at once</td></tr>
+          <tr><td><strong>Records</strong></td>
+              <td class="old">A notebook, or nothing at all</td>
+              <td class="new">Every job and payment listed in your dashboard</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ==================== FEATURES ==================== -->
+<div class="sec" id="features">
+  <div class="sec-head">
+    <div class="eyebrow">Features</div>
+    <h2>Built for what walks into your shop</h2>
+    <p>Aadhaar cards, PAN cards, question papers, forms, bill copies — handled.</p>
+  </div>
+  <div class="g3">
+    <div class="feat"><div class="ico">🆔</div><h3>ID cards, done right</h3>
+      <p>Aadhaar, PAN and Voter ID print at true card size — both sides on one
+        sheet, side by side or stacked.</p></div>
+    <div class="feat"><div class="ico">✨</div><h3>AI edge detection</h3>
+      <p>A photo of a document is found and cropped automatically, even on a
+        cluttered table or at an angle.</p></div>
+    <div class="feat"><div class="ico">📐</div><h3>Perspective correction</h3>
+      <p>A tilted photo is flattened square-on, with sliders to fine-tune it —
+        like a real scanner.</p></div>
+    <div class="feat"><div class="ico">📄</div><h3>PDFs with page ranges</h3>
+      <p>Up to 5 PDFs in one order, and the customer picks which pages —
+        “5-15”, “7”, or “1,4,9-12”.</p></div>
+    <div class="feat"><div class="ico">🖼️</div><h3>Up to 10 photos</h3>
+      <p>Multiple pages in one job, each editable, each priced correctly before
+        anyone pays.</p></div>
+    <div class="feat"><div class="ico">🖨️</div><h3>Two printers, auto-routed</h3>
+      <p>B/W jobs to one printer, colour to another, with your chosen paper
+        tray for each.</p></div>
+    <div class="feat"><div class="ico">💳</div><h3>Your own payment account</h3>
+      <p>Customers pay into <em>your</em> Cashfree account. We never touch the
+        money and take no cut of it.</p></div>
+    <div class="feat"><div class="ico">💰</div><h3>You set the prices</h3>
+      <p>Your own per-page rate for B/W and colour, changed any time from the
+        dashboard.</p></div>
+    <div class="feat"><div class="ico">🔒</div><h3>Files deleted after printing</h3>
+      <p>A customer's document is removed from the server as soon as it has
+        printed. Nothing is kept.</p></div>
+  </div>
+</div>
+
+<!-- ==================== EARNINGS CALCULATOR ==================== -->
+<div class="sec">
+  <div class="sec-head">
+    <div class="eyebrow">Worth it?</div>
+    <h2>What this adds up to</h2>
+    <p>Move your own numbers — nothing here is a promise, just arithmetic.</p>
+  </div>
+  <div class="card">
+    <div class="calc-row">
+      <div class="field">
+        <label for="c-jobs">Prints per day</label>
+        <input type="number" id="c-jobs" value="15" min="0" max="500">
+      </div>
+      <div class="field">
+        <label for="c-price">Your price per page (₹)</label>
+        <input type="number" id="c-price" value="3" min="0" step="0.5">
+      </div>
+      <div class="field">
+        <label for="c-days">Open days a month</label>
+        <input type="number" id="c-days" value="26" min="1" max="31">
+      </div>
+    </div>
+    <div class="calc-out">
+      <div class="muted tiny">Money through your counter each month</div>
+      <div class="big" id="c-month">₹1,170</div>
+      <div class="muted tiny" id="c-note"></div>
+    </div>
+    <p class="muted tiny" style="margin:.8rem 0 0;">This is your printing
+      revenue, paid into your own account — PrintHub takes no commission. What
+      you actually earn depends on your footfall, prices, paper and toner.</p>
+  </div>
+</div>
+
+<!-- ==================== PRICING ==================== -->
+<div class="sec" id="pricing">
+  <div class="sec-head">
+    <div class="eyebrow">Pricing</div>
+    <h2>One subscription. No commission, ever.</h2>
+    <p>A one-time ₹{{ "{:,}".format(install_fee) }} installation fee applies on your first
+      payment. Unlimited prints on every plan.</p>
+  </div>
+  <div class="plans">
+    <div class="plan">
+      <div class="muted tiny" style="font-weight:700;letter-spacing:.06em;">MONTHLY</div>
+      <div class="amt">₹{{ "{:,}".format(plans.monthly.fee) }}</div>
+      <div class="per">per month</div>
+      <ul>
+        <li>Unlimited prints</li>
+        <li>Your own QR code &amp; shop page</li>
+        <li>Auto-printing app for your PC</li>
+        <li>Two-printer routing</li>
+        <li>Cancel any time</li>
+      </ul>
+      <a class="btn btn-ghost btn-block" href="#get-started">Get started</a>
+    </div>
+    <div class="plan best">
+      <span class="tag">BEST VALUE</span>
+      <div class="muted tiny" style="font-weight:700;letter-spacing:.06em;">LIFETIME</div>
+      <div class="amt">₹{{ "{:,}".format(plans.lifetime.fee) }}</div>
+      <div class="per">one time, forever</div>
+      <ul>
+        <li>Everything in Monthly</li>
+        <li>No renewals, ever</li>
+        <li>All future features included</li>
+        <li>Priority support</li>
+        <li>Pays for itself, then it's yours</li>
+      </ul>
+      <a class="btn btn-primary btn-block" href="#get-started">Get started</a>
+    </div>
+    <div class="plan">
+      <div class="muted tiny" style="font-weight:700;letter-spacing:.06em;">YEARLY</div>
+      <div class="amt">₹{{ "{:,}".format(plans.yearly.fee) }}</div>
+      <div class="per">per year
+        <span class="pill pill-ok" style="margin-left:.3rem;">save
+          ₹{{ "{:,}".format(plans.monthly.fee * 12 - plans.yearly.fee) }}</span></div>
+      <ul>
+        <li>Everything in Monthly</li>
+        <li>Two months free vs monthly</li>
+        <li>One payment a year</li>
+        <li>15-day grace on renewal</li>
+      </ul>
+      <a class="btn btn-ghost btn-block" href="#get-started">Get started</a>
+    </div>
+  </div>
+  <p class="center muted tiny" style="margin-top:.9rem;">
+    Customer payments go straight into your own Cashfree account — PrintHub
+    never holds your money and takes 0% of it.</p>
+</div>
+
+<!-- ==================== SETUP ==================== -->
+<div class="sec">
+  <div class="sec-head">
+    <div class="eyebrow">Setup</div>
+    <h2>Running the same day</h2>
+    <p>No technical knowledge needed. We do the parts that need doing.</p>
+  </div>
+  <div class="g2">
+    <div class="feat"><div class="ico">1️⃣</div><h3>Register &amp; pay</h3>
+      <p>Tell us your shop name and pick a plan. Your login is created
+        automatically the moment payment succeeds.</p></div>
+    <div class="feat"><div class="ico">2️⃣</div><h3>Set your prices</h3>
+      <p>Sign in and enter your per-page rate for B/W and colour, and connect
+        your Cashfree account so customers can pay you.</p></div>
+    <div class="feat"><div class="ico">3️⃣</div><h3>Install the shop app</h3>
+      <p>Download it from your dashboard onto the PC with the printers, sign in
+        and pick which printer does B/W and which does colour.</p></div>
+    <div class="feat"><div class="ico">4️⃣</div><h3>Print your QR poster</h3>
+      <p>One click gives you a counter poster with your QR code. Stick it up —
+        you are open for business.</p></div>
+  </div>
+</div>
+
+<!-- ==================== FAQ ==================== -->
+<div class="sec">
+  <div class="sec-head">
+    <div class="eyebrow">Questions</div>
+    <h2>Straight answers</h2>
+  </div>
+  <details class="faq"><summary>Does the customer need to install an app?</summary>
+    <p>No. They scan the QR with their normal camera and your shop page opens in
+      their browser. Nothing to download, no account to create.</p></details>
+  <details class="faq"><summary>Where does the money go?</summary>
+    <p>Into your own Cashfree account, directly. You connect your account in the
+      dashboard and customer payments never pass through us. We take no
+      commission on printing — only the subscription.</p></details>
+  <details class="faq"><summary>What if a customer pays and the print doesn't come out?</summary>
+    <p>Paid jobs stay in your queue until they are printed — nothing is lost if
+      the printer is off or out of paper. If a payment isn't confirmed
+      automatically, "Re-check payments" on your dashboard asks Cashfree
+      directly and releases the job.</p></details>
+  <details class="faq"><summary>Can it print anything unpaid by mistake?</summary>
+    <p>No. A job only reaches your printer after the payment is confirmed. If a
+      payment fails or is abandoned, the job is cancelled and its file
+      deleted.</p></details>
+  <details class="faq"><summary>What happens to customers' documents?</summary>
+    <p>They are stored only while the job is waiting to print, and deleted from
+      the server as soon as it has printed. We don't keep copies.</p></details>
+  <details class="faq"><summary>Do I need a new printer?</summary>
+    <p>No. It works with the printers you already have, through your existing
+      Windows PC. You can use one printer for everything, or two with automatic
+      B/W and colour routing.</p></details>
+  <details class="faq"><summary>What if my internet goes down?</summary>
+    <p>Paid jobs wait on the server. When your shop PC reconnects, the queue
+      resumes and everything prints.</p></details>
+  <details class="faq"><summary>Can I change my prices later?</summary>
+    <p>Any time, from your dashboard. New prices apply to the next order
+      immediately.</p></details>
+</div>
+
+<!-- ==================== SHOPS ONLINE ==================== -->
 {% if shops %}
-<div class="card">
-  <div class="card-head"><h2>Shops online now</h2></div>
+<div class="sec">
+  <div class="sec-head">
+    <div class="eyebrow">Live now</div>
+    <h2>Shops taking orders</h2>
+    <p>Printing something today? Pick a shop, or scan its QR at the counter.</p>
+  </div>
   {% for v in shops %}
   <a class="shop-link" href="/{{ v.shop_code }}">
     <span class="shop-ico">🖨</span>
@@ -244,15 +584,22 @@
   </a>
   {% endfor %}
 </div>
-{% elif not error %}
-<div class="card center">
-  <p class="muted" style="margin:0;">No shops are online right now.<br>
-    Scan the QR code at your print shop's counter to get started.</p>
-</div>
 {% endif %}
 
-<p class="center muted tiny" style="margin-top:1.5rem;">
-  Run a print shop? <a href="{{ url_for('vendor_login') }}">Sign in</a> ·
+<!-- ==================== CTA ==================== -->
+<div class="cta-band" id="get-started">
+  <h2>Turn your counter into a self-service print shop</h2>
+  <p>Set up today. Your customers will work it out on their own.</p>
+  <div class="btn-row" style="justify-content:center;">
+    <a class="btn btn-ghost btn-lg" href="{{ url_for('vendor_login') }}">Shop owner sign in</a>
+  </div>
+  <p style="margin:.9rem 0 0; font-size:.82rem; color:rgba(255,255,255,.8);">
+    To open a new shop account, contact the administrator — your login and QR
+    code are created as soon as your first payment clears.</p>
+</div>
+
+<p class="center muted tiny" style="margin-top:1.2rem;">
+  Already running a shop? <a href="{{ url_for('vendor_login') }}">Sign in</a> ·
   <a href="{{ url_for('admin_login') }}">Administrator</a>
 </p>
 {% endblock %}
@@ -261,25 +608,38 @@
 <script>
 (function () {
   const $ = (id) => document.getElementById(id);
+
+  /* ---------------- earnings calculator ---------------- */
+  const inr = (n) => "₹" + Math.round(n).toLocaleString("en-IN");
+  function calc() {
+    const jobs = Math.max(0, +$("c-jobs").value || 0);
+    const price = Math.max(0, +$("c-price").value || 0);
+    const days = Math.max(1, +$("c-days").value || 1);
+    const month = jobs * price * days;
+    $("c-month").textContent = inr(month);
+    const lifetime = {{ plans.lifetime.fee }} + {{ install_fee }};
+    $("c-note").textContent = month > 0
+      ? "About " + inr(month * 12) + " a year · a lifetime plan (" + inr(lifetime)
+        + " once) is covered in " + Math.max(1, Math.ceil(lifetime / month)) + " month(s)"
+      : "";
+  }
+  ["c-jobs", "c-price", "c-days"].forEach(id =>
+    $(id).addEventListener("input", calc));
+  calc();
+
+  /* ---------------- animated explainer ---------------- */
   const screens = ["s-scan", "s-doc", "s-pay", "s-done"];
   const caps = Array.from(document.querySelectorAll(".step-t"));
   const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  let timers = [];
+  let timers = [], sweep = null;
 
-  function show(id) {
-    screens.forEach(s => $(s).classList.toggle("sc-hidden", s !== id));
-  }
-  function markStep(i) {
-    caps.forEach((c, n) => c.classList.toggle("on", n === i));
-  }
-  function at(ms, fn) { timers.push(setTimeout(fn, ms)); }
+  const show = (id) => screens.forEach(s =>
+    $(s).classList.toggle("sc-hidden", s !== id));
+  const markStep = (i) => caps.forEach((c, n) => c.classList.toggle("on", n === i));
+  const at = (ms, fn) => timers.push(setTimeout(fn, ms));
 
-  // The scan line sweeping down the QR in step 1.
-  let sweep = null;
   function startSweep() {
-    const line = $("scanline");
-    let t = 0;
-    stopSweep();
+    const line = $("scanline"); let t = 0; stopSweep();
     sweep = setInterval(() => {
       t = (t + 0.03) % 1;
       line.setAttribute("y", (66 + t * 61).toFixed(1));
@@ -288,11 +648,9 @@
   function stopSweep() { if (sweep) { clearInterval(sweep); sweep = null; } }
 
   function reset() {
-    timers.forEach(clearTimeout); timers = [];
-    stopSweep();
+    timers.forEach(clearTimeout); timers = []; stopSweep();
     show("s-scan"); markStep(0);
     $("qr-card").style.opacity = "1";
-    $("ph-body").style.transform = "translateX(0)";
     $("link").classList.add("sc-hidden");
     $("tick").classList.remove("on");
     $("led").setAttribute("fill", "var(--muted)");
@@ -304,55 +662,36 @@
 
   function play() {
     reset();
-    if (reduce) {           // no motion: just land on the finished state
-      show("s-done"); markStep(3);
+    if (reduce) {
+      show("s-done"); markStep(3); $("tick").classList.add("on");
       $("paper1").setAttribute("opacity", "1");
       $("paper1").style.transform = "translateY(0)";
-      $("tick").classList.add("on");
       return;
     }
     startSweep();
-
-    // 1) scanning the QR
     at(1500, () => { stopSweep(); $("qr-card").style.opacity = ".25"; });
-
-    // 2) the document, auto-cropped
     at(1800, () => { show("s-doc"); markStep(1); });
-
-    // 3) payment
     at(3600, () => { show("s-pay"); markStep(2); });
-
-    // 4) paid -> the job travels to the printer
-    at(5200, () => {
-      show("s-done");
-      $("tick").classList.add("on");
-      $("link").classList.remove("sc-hidden");
-    });
+    at(5200, () => { show("s-done"); $("tick").classList.add("on");
+                     $("link").classList.remove("sc-hidden"); });
     at(5700, () => {
       markStep(3);
       $("led").setAttribute("fill", "var(--ok)");
       $("led").setAttribute("opacity", "1");
       const p = $("paper1");
       p.setAttribute("opacity", "1");
-      p.style.transform = "translateY(0)";     // slide the sheet out
+      p.style.transform = "translateY(0)";
     });
-
-    // loop
     at(8200, play);
   }
 
-  // Only animate while the explainer is on screen.
   const demo = document.querySelector(".demo");
   if ("IntersectionObserver" in window) {
-    new IntersectionObserver((entries) => {
-      entries.forEach(e => {
-        if (e.isIntersecting) play();
-        else { timers.forEach(clearTimeout); timers = []; stopSweep(); }
-      });
-    }, { threshold: .35 }).observe(demo);
-  } else {
-    play();
-  }
+    new IntersectionObserver((es) => es.forEach(e => {
+      if (e.isIntersecting) play();
+      else { timers.forEach(clearTimeout); timers = []; stopSweep(); }
+    }), { threshold: .3 }).observe(demo);
+  } else { play(); }
   $("replay").addEventListener("click", play);
 })();
 </script>

@@ -380,6 +380,36 @@ def get_vendor_jobs(vendor_id, status=None, limit=100):
 
 
 # ---------------------------------------------------------------------------
+# Platform statistics (shown on the public landing page)
+# ---------------------------------------------------------------------------
+def platform_stats():
+    """Live numbers for the marketing page — never invented.
+
+    Returns shops (vendors able to take orders), pages actually printed,
+    documents printed, and the money customers have paid shop owners.
+    """
+    out = {"shops": 0, "pages": 0, "documents": 0, "paid_to_shops": 0.0}
+    try:
+        r = query("SELECT COUNT(*) AS n FROM vendors WHERE status IN "
+                  "('active','grace')")
+        out["shops"] = int(r[0]["n"]) if r else 0
+    except Exception:
+        pass
+    try:
+        r = query("SELECT COUNT(*) AS docs, "
+                  "       COALESCE(SUM(total_pages * copies), 0) AS pages, "
+                  "       COALESCE(SUM(price), 0) AS paid "
+                  "  FROM print_jobs WHERE status = 'printed'")
+        if r:
+            out["documents"] = int(r[0]["docs"] or 0)
+            out["pages"] = int(r[0]["pages"] or 0)
+            out["paid_to_shops"] = float(r[0]["paid"] or 0)
+    except Exception:
+        pass
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Gateway orders (one row per Cashfree order; drives webhook/return dispatch)
 # ---------------------------------------------------------------------------
 def insert_gateway_order(payload):
