@@ -8,3 +8,6 @@ worker/dist/
 server/downloads/
 *.spec.bak
 .claude/
+
+# local dev database
+server/printhub.sqlite
