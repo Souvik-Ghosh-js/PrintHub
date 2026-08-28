@@ -340,9 +340,16 @@ def compose_id_pdf(sides, layout, enhance_mode):
 
 
 def build_document_pdf(files, enhance_mode):
-    """Multi-page scan -> one A4-fit PDF (ported from the prototype)."""
+    """Multi-page scan -> one PDF, each page on an A4 sheet.
+
+    A landscape photo gets a LANDSCAPE sheet rather than being letterboxed
+    into a portrait one: forcing a wide image onto a tall page shrinks it to
+    the narrow dimension and prints big white bands above and below, wasting
+    most of the paper. Each page is sized to its own image, so the content
+    fills the sheet either way.
+    """
     DPI = 200
-    A4_W, A4_H = int(8.27 * DPI), int(11.69 * DPI)
+    A4_SHORT, A4_LONG = int(8.27 * DPI), int(11.69 * DPI)
     MARGIN = int(0.3 * DPI)
 
     pages = []
@@ -352,12 +359,20 @@ def build_document_pdf(files, enhance_mode):
             raise ValueError("could not decode a page image")
         bgr = docscan.enhance_image(bgr, enhance_mode)
         img = Image.fromarray(bgr[:, :, ::-1])
-        max_w, max_h = A4_W - 2 * MARGIN, A4_H - 2 * MARGIN
+
+        # Match the sheet to the image's own orientation.
+        if img.width > img.height:
+            sheet_w, sheet_h = A4_LONG, A4_SHORT      # landscape A4
+        else:
+            sheet_w, sheet_h = A4_SHORT, A4_LONG      # portrait A4
+
+        max_w, max_h = sheet_w - 2 * MARGIN, sheet_h - 2 * MARGIN
         scale = min(max_w / img.width, max_h / img.height)
         img = img.resize((max(1, int(img.width * scale)),
                           max(1, int(img.height * scale))), Image.LANCZOS)
-        page = Image.new("RGB", (A4_W, A4_H), "white")
-        page.paste(img, ((A4_W - img.width) // 2, (A4_H - img.height) // 2))
+        page = Image.new("RGB", (sheet_w, sheet_h), "white")
+        page.paste(img, ((sheet_w - img.width) // 2,
+                         (sheet_h - img.height) // 2))
         pages.append(page)
     if not pages:
         raise ValueError("no pages")
