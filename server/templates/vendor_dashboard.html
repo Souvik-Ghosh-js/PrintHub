@@ -42,7 +42,7 @@
 <div class="note note-warn" style="margin-bottom:1rem;">
   <strong>Your shop isn't taking orders yet.</strong>
   {% if not has_prices %} Set your per-page prices.{% endif %}
-  {% if not has_gateway %} Add your Cashfree account so customers can pay.{% endif %}
+  {% if not has_gateway %} Add your Razorpay account so customers can pay.{% endif %}
   Both are required — PrintHub only prints jobs that have been paid for online.
 </div>
 {% endif %}
@@ -67,7 +67,7 @@
       {% else %}<span class="pill pill-bad">required</span>{% endif %}
     </div>
     <p class="muted tiny">Charged per printed page. You keep 100% — customers
-      pay straight into your own Cashfree account.</p>
+      pay straight into your own Razorpay account.</p>
     <form method="post" action="{{ url_for('vendor_pricing') }}">
       <div class="field-row">
         <div class="field">
@@ -85,41 +85,45 @@
     </form>
   </div>
 
-  <!-- ---------- cashfree ---------- -->
+  <!-- ---------- razorpay ---------- -->
   <div class="card">
     <div class="card-head">
-      <h2>Payments (your Cashfree)</h2>
+      <h2>Payments (your Razorpay)</h2>
       {% if has_gateway %}<span class="pill pill-ok">connected</span>
       {% else %}<span class="pill pill-bad">required</span>{% endif %}
     </div>
     <p class="muted tiny">Your own account — customer payments land directly
       with you. Leave a secret blank to keep the saved value.</p>
-    <form method="post" action="{{ url_for('vendor_cashfree') }}">
+    <form method="post" action="{{ url_for('vendor_razorpay') }}">
       <div class="field">
         <label for="cf_app">App ID</label>
-        <input type="text" id="cf_app" name="cashfree_app_id"
-               value="{{ vendor.cashfree_app_id or '' }}" autocomplete="off">
+        <input type="text" id="rzp_key" name="razorpay_key_id"
+               value="{{ vendor.razorpay_key_id or '' }}" autocomplete="off"
+               placeholder="rzp_live_...">
       </div>
       <div class="field">
-        <label for="cf_secret">Secret key</label>
-        <input type="password" id="cf_secret" name="cashfree_secret_key" autocomplete="off"
-               placeholder="{{ '•••••••• saved' if vendor.cashfree_secret_key else 'not set' }}">
+        <label for="rzp_secret">Key secret</label>
+        <input type="password" id="rzp_secret" name="razorpay_key_secret" autocomplete="off"
+               placeholder="{{ '•••••••• saved' if vendor.razorpay_key_secret else 'not set' }}">
       </div>
       <div class="field">
-        <label for="cf_hook">Webhook secret</label>
-        <input type="password" id="cf_hook" name="cashfree_webhook_secret" autocomplete="off"
-               placeholder="{{ '•••••••• saved' if vendor.cashfree_webhook_secret else 'not set' }}">
+        <label for="rzp_hook">Webhook secret</label>
+        <input type="password" id="rzp_hook" name="razorpay_webhook_secret" autocomplete="off"
+               placeholder="{{ '•••••••• saved' if vendor.razorpay_webhook_secret else 'not set' }}">
+        <p class="muted tiny" style="margin:.3rem 0 0;">The secret you set on
+          the webhook itself in Razorpay — not your key secret.</p>
       </div>
-      <div class="field">
-        <label for="cf_env">Mode</label>
-        <select id="cf_env" name="cashfree_env">
-          <option value="production" {% if vendor.cashfree_env != 'sandbox' %}selected{% endif %}>Production (live money)</option>
-          <option value="sandbox" {% if vendor.cashfree_env == 'sandbox' %}selected{% endif %}>Sandbox (testing)</option>
-        </select>
-      </div>
-      <p class="muted tiny" style="margin-top:.7rem;">In your Cashfree dashboard set the webhook URL to<br>
-        <code>{{ webhook_url }}</code></p>
-      <button type="submit" class="btn btn-primary">Save Cashfree account</button>
+      {% if vendor.razorpay_key_id and vendor.razorpay_key_id.startswith('rzp_test_') %}
+      <div class="note note-warn" style="margin:.6rem 0;">
+        These are <strong>test keys</strong> — no real money is collected.
+        Switch to your live keys when you are ready to trade.</div>
+      {% endif %}
+      <p class="muted tiny" style="margin-top:.7rem;">In your Razorpay dashboard
+        (Settings → Webhooks) add this URL<br>
+        <code>{{ base_url }}/payment/webhook/vendor</code><br>
+        subscribed to <code>payment.captured</code> and
+        <code>payment.failed</code>.</p>
+      <button type="submit" class="btn btn-primary">Save Razorpay account</button>
     </form>
   </div>
 </div>
@@ -280,7 +284,7 @@
     </form>
   </div>
   <p class="muted tiny" style="margin:-.4rem 0 .8rem;">If a customer paid but
-    their job still says &ldquo;awaiting payment&rdquo;, this asks Cashfree
+    their job still says &ldquo;awaiting payment&rdquo;, this asks Razorpay
     directly and releases the job to the printer.</p>
   <div class="table-scroll">
     <table>

@@ -6,15 +6,18 @@ import os
 
 SECRET_KEY = os.environ.get("PRINTHUB_SECRET_KEY", "CHANGE_ME_printhub_flask_secret")
 
-# --- PLATFORM Cashfree account (GOBT's own) ---
-# Receives vendor SUBSCRIPTION money: first combined payment (plan fee +
-# installation) and renewals. This is separate from each vendor's OWN
-# Cashfree account (stored per vendor row), which receives that shop's
-# customer print-job payments — every site has a DIFFERENT Cashfree account.
-PLATFORM_CASHFREE_APP_ID = os.environ.get("PLATFORM_CASHFREE_APP_ID", "")
-PLATFORM_CASHFREE_SECRET_KEY = os.environ.get("PLATFORM_CASHFREE_SECRET_KEY", "")
-PLATFORM_CASHFREE_WEBHOOK_SECRET = os.environ.get("PLATFORM_CASHFREE_WEBHOOK_SECRET", "")
-PLATFORM_CASHFREE_ENV = os.environ.get("PLATFORM_CASHFREE_ENV", "production")  # production|sandbox
+# --- PLATFORM Razorpay account (GOBT's own) ---
+# Receives vendor money: the installation fee, yearly/lifetime plan fees and
+# the monthly autopay mandate. Separate from each vendor's OWN Razorpay
+# account (stored per vendor row), which receives that shop's customer
+# print-job payments — every shop has a DIFFERENT account.
+#
+# Razorpay has no environment flag: test and live are different key pairs.
+# The key id itself says which one is in use (rzp_test_* vs rzp_live_*).
+PLATFORM_RAZORPAY_KEY_ID = os.environ.get("PLATFORM_RAZORPAY_KEY_ID", "")
+PLATFORM_RAZORPAY_KEY_SECRET = os.environ.get("PLATFORM_RAZORPAY_KEY_SECRET", "")
+# Set per-webhook in the Razorpay dashboard — NOT the API key secret.
+PLATFORM_RAZORPAY_WEBHOOK_SECRET = os.environ.get("PLATFORM_RAZORPAY_WEBHOOK_SECRET", "")
 
 # --- Subscription & pricing model (spec §5, §6) ---
 INSTALLATION_FEE = 2000          # one-time, every vendor, non-recurring

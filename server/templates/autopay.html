@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Set up autopay — PrintHub{% endblock %}
 {% block wrapclass %}wrap-tight{% endblock %}
-{% block head %}<script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>{% endblock %}
+{% block head %}<script src="https://checkout.razorpay.com/v1/checkout.js"></script>{% endblock %}
 {% block nav %}<a href="{{ url_for('vendor_dashboard') }}">Back to dashboard</a>{% endblock %}
 
 {% block content %}
@@ -32,25 +32,36 @@
   <p class="muted tiny" style="margin-top:1rem;">
     You'll approve this once in your UPI app (or with your bank). After that
     the renewal is paid on its own and your shop never goes offline for a
-    missed payment. You can cancel autopay any time from your dashboard, and
-    your bank will always notify you before each debit.</p>
+    missed payment. You can cancel autopay any time from your dashboard.</p>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-  const cf = new Cashfree({ mode: "{{ cf_env }}" });
+  // Authorising a subscription uses subscription_id where a one-time
+  // payment would use order_id. Razorpay charges the first month at
+  // authorisation and keeps it, then debits every cycle on its own.
+  const rzp = new Razorpay({
+    key: "{{ key_id }}",
+    subscription_id: "{{ subscription_id }}",
+    name: "PrintHub",
+    description: "₹{{ amount }} per {{ interval }} — autopay",
+    prefill: { name: "{{ vendor.shop_name }}", email: "{{ vendor.email or '' }}",
+               contact: "{{ vendor.phone or '' }}" },
+    theme: { color: "#4f46e5" },
+    handler: function () { window.location = "{{ url_for('vendor_autopay_return') }}"; },
+    modal: { ondismiss: function () {
+      const b = document.getElementById("approve");
+      b.disabled = false; b.textContent = "Approve the mandate";
+    } }
+  });
+  rzp.on("payment.failed", function () {
+    alert("The mandate was not approved. Nothing was charged — you can try again.");
+  });
   document.getElementById("approve").addEventListener("click", (e) => {
     e.target.disabled = true;
     e.target.textContent = "Opening your UPI app…";
-    cf.subscriptionsCheckout({
-      subsSessionId: "{{ session_id }}",
-      redirectTarget: "_self",
-    }).catch(() => {
-      e.target.disabled = false;
-      e.target.textContent = "Approve the mandate";
-      alert("Could not open the approval screen. Please try again.");
-    });
+    rzp.open();
   });
 </script>
 {% endblock %}

@@ -84,8 +84,10 @@ CREATE TABLE IF NOT EXISTS vendors (
     cashfree_app_id TEXT, cashfree_secret_key TEXT,
     cashfree_webhook_secret TEXT,
     cashfree_env TEXT NOT NULL DEFAULT 'production',
+    razorpay_key_id TEXT, razorpay_key_secret TEXT,
+    razorpay_webhook_secret TEXT,
     autopay_subscription_id TEXT, autopay_status TEXT,
-    autopay_next_charge TEXT,
+    autopay_next_charge TEXT, autopay_plan_id TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS payments (
@@ -142,6 +144,10 @@ _SQLITE_MIGRATIONS = [
     "ALTER TABLE vendors ADD COLUMN autopay_subscription_id TEXT",
     "ALTER TABLE vendors ADD COLUMN autopay_status TEXT",
     "ALTER TABLE vendors ADD COLUMN autopay_next_charge TEXT",
+    "ALTER TABLE vendors ADD COLUMN razorpay_key_id TEXT",
+    "ALTER TABLE vendors ADD COLUMN razorpay_key_secret TEXT",
+    "ALTER TABLE vendors ADD COLUMN razorpay_webhook_secret TEXT",
+    "ALTER TABLE vendors ADD COLUMN autopay_plan_id TEXT",
 ]
 
 
@@ -423,7 +429,7 @@ def platform_stats():
 
 
 # ---------------------------------------------------------------------------
-# Gateway orders (one row per Cashfree order; drives webhook/return dispatch)
+# Gateway orders (one row per Razorpay order; drives webhook/return dispatch)
 # ---------------------------------------------------------------------------
 def insert_gateway_order(payload):
     return _insert("gateway_orders", payload)

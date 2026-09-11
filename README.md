@@ -78,29 +78,43 @@ has a Log out button to switch shops. Distribute it by uploading the built
 `PrintHubWorker.exe` to `server/downloads/` on the server — vendors then get
 a download button on their dashboard (`/download/worker`).
 
-## Payments (Cashfree — every site has a DIFFERENT account)
+## Payments (Razorpay — every shop has a DIFFERENT account)
 
-Two kinds of Cashfree accounts, handled by `server/cashfree.py`:
+Two kinds of Razorpay accounts, handled by `server/razorpay_pg.py`:
 
-1. **Each vendor's OWN account** — customer print-job payments for a shop go
-   through that shop's keys, saved by the vendor on their dashboard
-   (App ID / secret / webhook secret / env, stored per vendor row). When keys
-   are saved, the customer page offers "Pay online"; the job reaches the
-   worker only after the payment succeeds (falls back to pay-at-counter if
-   the gateway declines to create the order). Vendors point their Cashfree
-   webhook at `…/payment/webhook/vendor` — the server resolves the vendor
-   from the order and verifies against *that vendor's* webhook secret. The
-   customer page also polls `…/payment-status/<order>`, which double-checks
-   with Cashfree directly, so payments confirm even without a reachable
-   webhook (local testing).
-2. **The platform account** (GOBT's own; `PLATFORM_CASHFREE_*` env vars or
-   `config.py`) — vendor subscription money. Registering a vendor produces a
-   public pay link `/pay/onboard/<shop_code>` for the first combined payment
-   (plan fee + ₹2,000 installation); on success the auto-generated
-   credentials are shown ONCE to the vendor (spec §6.4). Renewals: "Renew
-   online" on the vendor dashboard (plan fee only). Platform webhook URL:
-   `…/payment/webhook/platform`. Manual recording in the admin panel remains
-   as a fallback for cash/bank-transfer vendors.
+1. **Each vendor's own account** (`vendors.razorpay_*` columns) receives that
+   shop's customer print-job payments. A shop with no keys cannot take orders
+   at all (the gateway declines to create the order). Vendors point their
+   Razorpay webhook at `…/payment/webhook/vendor`, subscribed to
+   `payment.captured` and `payment.failed`; a reconciler also re-checks
+   pending orders with Razorpay directly, so payments confirm even without a
+   reachable webhook.
+
+2. **The platform account** (GOBT's own; `PLATFORM_RAZORPAY_*` env vars)
+   receives the installation fee, yearly/lifetime plan fees, and the monthly
+   autopay mandate. Webhooks go to `…/payment/webhook/platform` and
+   `…/payment/webhook/autopay`.
+
+**Amounts are integer paise at the Razorpay boundary** and rupees everywhere
+else. `razorpay_pg.to_paise()` / `to_rupees()` are the only places that
+convert — nothing else should multiply by 100.
+
+**A payment counts only when CAPTURED.** An `authorized` payment has taken
+the customer's money but is auto-refunded within 3 days if never captured, so
+it must never mark a job printable or a subscription active.
+
+Three different signatures, easy to confuse:
+
+| What | Signed string | Key |
+|---|---|---|
+| One-time payment | `order_id\|payment_id` | API key secret |
+| Subscription auth | `payment_id\|subscription_id` | API key secret |
+| Webhook | the raw request body | **webhook** secret |
+
+Autopay uses Razorpay Subscriptions with **no `start_at`**, so authorising the
+mandate charges the first month immediately and Razorpay keeps it; every later
+cycle is debited by Razorpay itself (no scheduler here). A failed debit arrives
+as `subscription.pending`, then `subscription.halted` once retries are spent.
 
 ## Deliberate v1 simplifications
 - **Autopay** is modeled (renewal amounts, due dates, grace, suspension) and

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Payment — PrintHub{% endblock %}
 {% block wrapclass %}wrap-tight{% endblock %}
-{% block head %}<script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>{% endblock %}
+{% block head %}<script src="https://checkout.razorpay.com/v1/checkout.js"></script>{% endblock %}
 {% block nav %}{% endblock %}
 
 {% block content %}
@@ -44,16 +44,35 @@
       Plan fee only — the installation fee is never charged again.
     {% endif %}
   </p>
-  <p class="muted tiny">Order {{ order_id }} · secured by Cashfree</p>
+  <p class="muted tiny">Order {{ order_id }} · secured by Razorpay</p>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-  const cf = new Cashfree({ mode: "{{ cf_env }}" });
+  // The handler is UX only — the webhook is what actually confirms payment,
+  // so a vendor who closes the tab still gets their subscription activated.
+  const rzp = new Razorpay({
+    key: "{{ key_id }}",
+    order_id: "{{ order_id }}",
+    amount: {{ amount_paise }},
+    currency: "INR",
+    name: "PrintHub",
+    description: "{{ 'Installation & subscription' if purpose == 'first_payment' else 'Subscription renewal' }}",
+    prefill: { name: "{{ shop_name }}", email: "{{ email or '' }}", contact: "{{ phone or '' }}" },
+    theme: { color: "#4f46e5" },
+    handler: function () { window.location = "/pay/return?order_id={{ order_id }}"; },
+    modal: { ondismiss: function () {
+      const b = document.getElementById("pay-btn");
+      b.disabled = false; b.textContent = "Pay ₹{{ amount }} securely";
+    } }
+  });
+  rzp.on("payment.failed", function () {
+    alert("Payment failed. Nothing was charged — you can try again.");
+  });
   document.getElementById("pay-btn").addEventListener("click", (e) => {
     e.target.disabled = true; e.target.textContent = "Opening payment…";
-    cf.checkout({ paymentSessionId: "{{ payment_session_id }}", redirectTarget: "_self" });
+    rzp.open();
   });
 </script>
 {% endblock %}

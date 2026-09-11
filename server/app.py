@@ -26,10 +26,9 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from PIL import Image
 
 import billing
-import cashfree
-import cashfree_subs
 import config
 import db
+import razorpay_pg as rzp
 import docscan
 
 app = Flask(__name__)
@@ -102,7 +101,7 @@ def health():
 @app.route("/")
 def index():
     """Landing: shops customers can actually order from — subscription live
-    AND their own Cashfree account configured (payment is online-only)."""
+    AND their own Razorpay account configured (payment is online-only)."""
     vendors = [billing.refresh_status(v) for v in db.list_vendors()]
     shops = [v for v in vendors
              if billing.has_access(v) and _vendor_gateway_ready(v)
@@ -114,9 +113,9 @@ def index():
 
 
 def _vendor_gateway_ready(vendor) -> bool:
-    """True if this shop's OWN Cashfree account is configured (per-site keys)."""
-    return cashfree.configured(vendor.get("cashfree_app_id"),
-                               vendor.get("cashfree_secret_key"))
+    """True if this shop's OWN Razorpay account is configured (per-shop keys)."""
+    return rzp.configured(vendor.get("razorpay_key_id"),
+                          vendor.get("razorpay_key_secret"))
 
 
 @app.route("/shop/<code>")
@@ -126,7 +125,7 @@ def shop(code):
         return render_template("landing.html", shops=[],
                                error="This shop is not available right now."), 404
     # Payment is online-only, so a shop is only orderable once it has its own
-    # Cashfree account AND real prices set.
+    # Razorpay account AND real prices set.
     if not _vendor_gateway_ready(vendor) or float(vendor.get("price_bw") or 0) <= 0:
         return render_template(
             "landing.html", shops=[],
@@ -654,8 +653,8 @@ def shop_preview(code):
 def shop_order(code):
     """Create a print job at this vendor and start its ONLINE payment.
 
-    Payment is online-only: a Cashfree order is created on THIS VENDOR'S OWN
-    Cashfree account (every site has a different account), and the job only
+    Payment is online-only: a Razorpay order is created on THIS VENDOR'S OWN
+    Razorpay account (every shop has a different account), and the job only
     reaches the shop's printer after the payment actually succeeds. There is
     no counter/manual path — nothing prints unpaid.
     """
@@ -709,17 +708,13 @@ def shop_order(code):
                     f"job {job_id}: {label}, {color_mode}, x{copies}, ₹{price}",
                     vendor_id=vendor["id"])
 
-    order_id = f"PJOB_{job_id}_{int(time.time())}"
-    result = cashfree.create_order(
-        app_id=vendor["cashfree_app_id"],
-        secret_key=vendor["cashfree_secret_key"],
-        env=vendor.get("cashfree_env") or "production",
-        order_id=order_id, amount=price,
-        customer_id=f"cust_{job_id}",
-        customer_email="customer@example.com",
-        customer_phone=customer_phone or "9999999999",
-        return_url=f"{request.url_root}{code}",
-        note=f"Print job #{job_id} at {vendor['shop_name']}",
+    # Razorpay generates the order id; ours becomes the receipt, so the
+    # shop can match a payment back to a job in their dashboard.
+    result = rzp.create_order(
+        vendor["razorpay_key_id"], vendor["razorpay_key_secret"],
+        amount=price,
+        receipt=f"PJOB_{job_id}_{int(time.time())}",
+        notes={"job_id": job_id, "shop": vendor["shop_name"]},
     )
     if not result["success"]:
         # No payment session -> no job. Never leave an unpayable job queued.
@@ -733,14 +728,16 @@ def shop_order(code):
                                  "again in a moment.",
                         "detail": result["error"]}), 502
 
+    order_id = result["order_id"]
     db.update_job(job_id, {"order_id": order_id})
     db.insert_gateway_order({"order_id": order_id, "vendor_id": vendor["id"],
                              "purpose": "print_job", "amount": price})
     return jsonify({"ok": True, "job_id": job_id, "price": price,
                     "total_pages": total_pages,
                     "order_id": order_id,
-                    "payment_session_id": result["payment_session_id"],
-                    "cf_env": vendor.get("cashfree_env") or "production"})
+                    "amount_paise": result["amount_paise"],
+                    "key_id": result["key_id"],
+                    "shop_name": vendor["shop_name"]})
 
 
 def _finalize_print_order(order, success, transaction_id=None):
@@ -773,7 +770,7 @@ def _finalize_print_order(order, success, transaction_id=None):
 
 @app.route("/shop/<code>/payment-status/<order_id>")
 def shop_payment_status(code, order_id):
-    """Poll endpoint for the customer page. Also asks Cashfree directly
+    """Poll endpoint for the customer page. Also asks Razorpay directly
     (vendor's own keys) so payments confirm even when the public webhook
     can't reach this server (e.g. local testing)."""
     vendor = db.get_vendor_by_code(code)
@@ -781,29 +778,25 @@ def shop_payment_status(code, order_id):
     if not vendor or not order or order.get("vendor_id") != vendor["id"]:
         return jsonify({"error": "not found"}), 404
     if order["status"] == "pending":
-        cf_status = cashfree.order_status(
-            vendor["cashfree_app_id"], vendor["cashfree_secret_key"],
-            vendor.get("cashfree_env") or "production", order_id)
-        if cf_status == "PAID":
+        # Only 'paid' means captured. 'attempted' is still in flight, so we
+        # keep waiting rather than cancelling a job the customer is paying for.
+        if rzp.fetch_order(vendor["razorpay_key_id"],
+                           vendor["razorpay_key_secret"], order_id) == "paid":
             _finalize_print_order(order, True)
-            order = db.get_gateway_order(order_id)
-        elif cf_status in ("EXPIRED", "TERMINATED"):
-            _finalize_print_order(order, False)
             order = db.get_gateway_order(order_id)
     return jsonify({"order_id": order_id, "status": order["status"]})
 
 
-# How long a pending print order stays reconcilable. Cashfree sessions expire
-# well inside this, so anything older is genuinely abandoned.
+# How long a pending print order stays reconcilable.
 # 24h: a shop can close for the night with a paid job unconfirmed, and the
-# customer will come back for their print the next morning. Cashfree keeps
+# customer will come back for their print the next morning. Razorpay keeps
 # order records far longer, so asking about a day-old order is still valid.
 RECONCILE_MAX_AGE_MIN = 24 * 60
 RECONCILE_MIN_AGE_SEC = 45      # give the live poll a chance first
 
 
 def reconcile_pending_orders(vendor_id=None, limit=25):
-    """Ask Cashfree about print orders we still think are pending.
+    """Ask Razorpay about print orders we still think are pending.
 
     The browser poll only runs while the customer keeps the page open, and a
     vendor may not have configured their webhook, so a real payment can go
@@ -835,46 +828,45 @@ def reconcile_pending_orders(vendor_id=None, limit=25):
         vendor = db.get_vendor(order["vendor_id"])
         if not vendor or not _vendor_gateway_ready(vendor):
             continue
-        status = cashfree.order_status(
-            vendor["cashfree_app_id"], vendor["cashfree_secret_key"],
-            vendor.get("cashfree_env") or "production", order["order_id"])
-        if status == "PAID":
+        status = rzp.fetch_order(vendor["razorpay_key_id"],
+                                 vendor["razorpay_key_secret"],
+                                 order["order_id"])
+        if status == "paid":
             _finalize_print_order(order, True)
             db.log_activity("system", "payment_reconciled",
-                            f"order {order['order_id']} was paid at Cashfree "
+                            f"order {order['order_id']} was paid at Razorpay "
                             f"but never confirmed here; job released to print",
                             vendor_id=vendor["id"])
-            changed += 1
-        elif status in ("EXPIRED", "TERMINATED"):
-            _finalize_print_order(order, False)
             changed += 1
     return changed
 
 
 @app.route("/payment/webhook/vendor", methods=["POST"])
 def vendor_payment_webhook():
-    """Cashfree webhook for PRINT-JOB payments. Every vendor points their
-    OWN Cashfree account's webhook at this one URL; we resolve the vendor
+    """Razorpay webhook for PRINT-JOB payments. Every vendor points their
+    OWN Razorpay account's webhook at this one URL; we resolve the vendor
     from the order and verify against THAT vendor's webhook secret."""
-    data = request.get_json(silent=True) or {}
-    order_id = data.get("data", {}).get("order", {}).get("order_id")
-    payment = data.get("data", {}).get("payment", {})
+    raw = request.get_data()          # RAW bytes — re-serialising breaks the HMAC
+    ev = rzp.parse_webhook(raw)
+    order_id = ev.get("order_id")
     if not order_id:
-        return jsonify({"error": "missing order_id"}), 400
+        return jsonify({"status": "ignored"}), 200
     order = db.get_gateway_order(order_id)
     if not order or order["purpose"] != "print_job":
         return jsonify({"error": "unknown order"}), 404
     vendor = db.get_vendor(order["vendor_id"])
     if not vendor:
         return jsonify({"error": "unknown vendor"}), 404
-    if not cashfree.verify_webhook(vendor.get("cashfree_webhook_secret"),
-                                   request.headers,
-                                   request.get_data(as_text=True)):
+    if not rzp.verify_webhook(vendor.get("razorpay_webhook_secret"),
+                              request.headers, raw):
         print(f"[webhook/vendor] REJECTED: bad signature for {order_id}")
         return jsonify({"error": "invalid signature"}), 401
-    status = payment.get("payment_status", "").upper()
-    _finalize_print_order(order, status == "SUCCESS",
-                          payment.get("cf_payment_id"))
+
+    # Money is only ours once CAPTURED; 'authorized' can still be auto-refunded.
+    if ev["event"] in (rzp.EVENT_PAYMENT_CAPTURED, rzp.EVENT_ORDER_PAID):
+        _finalize_print_order(order, True, ev.get("payment_id"))
+    elif ev["event"] == rzp.EVENT_PAYMENT_FAILED:
+        _finalize_print_order(order, False, ev.get("payment_id"))
     return jsonify({"status": "ok"})
 
 
@@ -1002,30 +994,33 @@ def vendor_dashboard(vendor):
         has_gateway=has_gateway, has_prices=has_prices, stats=stats,
         live=billing.has_access(vendor) and has_gateway and has_prices,
         days_left=billing.days_until_renewal(vendor),
-        autopay_on=(vendor.get("autopay_status") or "").upper() == "ACTIVE",
+        autopay_on=(vendor.get("autopay_status") or "").lower()
+                   in ("active", "authenticated"),
         autopay_supported=vendor["plan"] in AUTOPAY_INTERVAL,
         awaiting_mandate=billing.awaiting_mandate(vendor),
         mandate_fee=billing.renewal_amount(vendor["plan"])
                     if vendor["plan"] in AUTOPAY_INTERVAL else 0,
-        autopay_pending=(vendor.get("autopay_status") or "").upper()
-                        in ("INITIALIZED", "BANK_APPROVAL_PENDING"),
+        autopay_pending=(vendor.get("autopay_status") or "").lower() == "created",
         renewal_amount=(billing.renewal_amount(vendor["plan"])
                         if vendor["plan"] != "lifetime" else 0),
         shop_url=f"{base}/{vendor['shop_code']}",
+        # The credentials card shows the vendor their webhook URL; without
+        # this it would render with a blank host and mislead them.
+        base_url=base,
         webhook_url=f"{base}/payment/webhook/vendor")
 
 
 @app.route("/vendor/recheck-payments", methods=["POST"])
 @vendor_required
 def vendor_recheck_payments(vendor):
-    """Manually re-check pending payments with Cashfree (for a customer who
+    """Manually re-check pending payments with Razorpay (for a customer who
     says they paid but whose job is still awaiting payment)."""
     try:
         n = reconcile_pending_orders(vendor_id=vendor["id"], limit=50)
     except Exception as e:
-        flash(f"Could not reach Cashfree: {e}")
+        flash(f"Could not reach Razorpay: {e}")
         return redirect(url_for("vendor_dashboard"))
-    flash(f"Checked pending payments with Cashfree — {n} updated."
+    flash(f"Checked pending payments with Razorpay — {n} updated."
           if n else "Checked pending payments — nothing new was paid.")
     return redirect(url_for("vendor_dashboard"))
 
@@ -1051,31 +1046,34 @@ def vendor_pricing(vendor):
     return redirect(url_for("vendor_dashboard"))
 
 
-@app.route("/vendor/cashfree", methods=["POST"])
+@app.route("/vendor/razorpay", methods=["POST"])
 @vendor_required
-def vendor_cashfree(vendor):
-    """Save this shop's OWN Cashfree account keys (every site has a
+def vendor_razorpay(vendor):
+    """Save this shop's OWN Razorpay account keys (every shop has a
     different account). Blank secret fields keep the stored value."""
     fields = {
-        "cashfree_app_id": request.form.get("cashfree_app_id", "").strip(),
-        "cashfree_secret_key": request.form.get("cashfree_secret_key", "").strip(),
-        "cashfree_webhook_secret": request.form.get("cashfree_webhook_secret", "").strip(),
+        "razorpay_key_id": request.form.get("razorpay_key_id", "").strip(),
+        "razorpay_key_secret": request.form.get("razorpay_key_secret", "").strip(),
+        "razorpay_webhook_secret": request.form.get("razorpay_webhook_secret", "").strip(),
     }
     fields = {k: v for k, v in fields.items() if v}   # keep saved secrets
-    fields["cashfree_env"] = ("sandbox" if request.form.get("cashfree_env") == "sandbox"
-                              else "production")
     db.update_vendor(vendor["id"], fields)
-    db.log_activity("vendor", "cashfree_updated",
-                    "shop Cashfree account keys changed", vendor_id=vendor["id"])
-    flash("Cashfree account saved. Customers can now pay online at your shop page.")
+    db.log_activity("vendor", "razorpay_updated",
+                    "shop Razorpay account keys changed", vendor_id=vendor["id"])
+    if rzp.is_test_key(fields.get("razorpay_key_id") or vendor.get("razorpay_key_id")):
+        flash("Saved — but these are TEST keys, so no real money will be "
+              "collected. Use your live keys to take real payments.")
+    else:
+        flash("Razorpay account saved. Customers can now pay online at your "
+              "shop page.")
     return redirect(url_for("vendor_dashboard"))
 
 
 # ===========================================================================
-# Vendor subscription payments — PLATFORM Cashfree account (spec §5, §6)
+# Vendor subscription payments — PLATFORM Razorpay account (spec §5, §6)
 # ===========================================================================
 def _start_subscription_checkout(vendor, purpose):
-    """Create a platform-account Cashfree order for a vendor's first payment
+    """Create a platform-account Razorpay order for a vendor's first payment
     (plan fee + installation) or renewal (plan fee only). Returns a rendered
     checkout page or an error string."""
     if purpose == "first_payment":
@@ -1085,30 +1083,22 @@ def _start_subscription_checkout(vendor, purpose):
         install_fee = amounts["installation_fee"]
         mandate_fee = amounts["mandate_fee"]
         prefix = "SUB"
-        note = (f"PrintHub ₹{install_fee} installation"
-                if mandate_fee else
-                f"PrintHub {vendor['plan']} subscription "
-                f"+ ₹{install_fee} installation")
     else:
         amount = billing.renewal_amount(vendor["plan"])
         plan_fee, install_fee, mandate_fee = amount, 0, 0
         prefix = "REN"
-        note = f"PrintHub {vendor['plan']} renewal"
 
-    order_id = f"{prefix}_{vendor['id']}_{int(time.time())}"
-    result = cashfree.create_order(
-        app_id=config.PLATFORM_CASHFREE_APP_ID,
-        secret_key=config.PLATFORM_CASHFREE_SECRET_KEY,
-        env=config.PLATFORM_CASHFREE_ENV,
-        order_id=order_id, amount=amount,
-        customer_id=f"vendor_{vendor['id']}",
-        customer_email=vendor.get("email"),
-        customer_phone=vendor.get("phone"),
-        return_url=f"{request.url_root}pay/return?order_id={order_id}",
-        note=note,
+    result = rzp.create_order(
+        config.PLATFORM_RAZORPAY_KEY_ID,
+        config.PLATFORM_RAZORPAY_KEY_SECRET,
+        amount=amount,
+        receipt=f"{prefix}_{vendor['id']}_{int(time.time())}",
+        notes={"vendor_id": vendor["id"], "purpose": purpose,
+               "shop": vendor["shop_name"]},
     )
     if not result["success"]:
         return None, result["error"]
+    order_id = result["order_id"]
     db.insert_gateway_order({"order_id": order_id, "vendor_id": vendor["id"],
                              "purpose": purpose, "amount": amount})
     return render_template("pay.html", shop_name=vendor["shop_name"],
@@ -1116,22 +1106,37 @@ def _start_subscription_checkout(vendor, purpose):
                            plan_fee=plan_fee, install_fee=install_fee,
                            mandate_fee=mandate_fee,
                            order_id=order_id, purpose=purpose,
-                           payment_session_id=result["payment_session_id"],
-                           cf_env=config.PLATFORM_CASHFREE_ENV), None
+                           amount_paise=result["amount_paise"],
+                           key_id=result["key_id"],
+                           email=vendor.get("email"),
+                           phone=vendor.get("phone")), None
 
 
 # ===========================================================================
-# Autopay — the vendor authorises a mandate once and Cashfree debits each
+# Autopay — the vendor authorises a mandate once and Razorpay debits each
 # cycle by itself (plan_type PERIODIC). We never schedule or raise a charge.
 # ===========================================================================
 # Monthly only. Yearly is a one-time charge the vendor renews themselves.
-AUTOPAY_INTERVAL = {"monthly": ("MONTH", 1)}
+def _charge_at_text(ts):
+    """Razorpay reports the next debit as a unix timestamp; store it in the
+    same YYYY-MM-DD... shape the dashboard already slices for display."""
+    if not ts:
+        return None
+    try:
+        return datetime.fromtimestamp(int(ts)).isoformat(" ", "seconds")
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+AUTOPAY_INTERVAL = {"monthly": ("monthly", 1)}
+# Cycles a mandate may run before re-authorisation: ten years of months.
+AUTOPAY_TOTAL_COUNT = 120
 
 
 @app.route("/vendor/autopay/start", methods=["POST"])
 @vendor_required
 def vendor_autopay_start(vendor):
-    """Create the mandate and send the vendor to Cashfree to approve it."""
+    """Create the mandate and send the vendor to Razorpay to approve it."""
     if vendor["plan"] == "lifetime":
         flash("Lifetime plans have nothing to renew — autopay is not needed.")
         return redirect(url_for("vendor_dashboard"))
@@ -1139,89 +1144,84 @@ def vendor_autopay_start(vendor):
         flash("Autopay is only available on the monthly plan. Yearly is a "
               "one-time payment you renew when it runs out.")
         return redirect(url_for("vendor_dashboard"))
-    if not cashfree.configured(config.PLATFORM_CASHFREE_APP_ID,
-                               config.PLATFORM_CASHFREE_SECRET_KEY):
+    if not rzp.configured(config.PLATFORM_RAZORPAY_KEY_ID,
+                          config.PLATFORM_RAZORPAY_KEY_SECRET):
         flash("Autopay is not available yet — please renew manually.")
         return redirect(url_for("vendor_dashboard"))
 
     amount = billing.renewal_amount(vendor["plan"])
-    if amount > cashfree_subs.UPI_AUTOPAY_NO_AFA_LIMIT:
-        flash(f"₹{amount} is above the ₹{cashfree_subs.UPI_AUTOPAY_NO_AFA_LIMIT} "
+    if amount > rzp.UPI_AUTOPAY_NO_AFA_LIMIT:
+        flash(f"₹{amount} is above the ₹{rzp.UPI_AUTOPAY_NO_AFA_LIMIT} "
               f"UPI Autopay limit — please renew manually each period.")
         return redirect(url_for("vendor_dashboard"))
 
-    interval_type, intervals = AUTOPAY_INTERVAL[vendor["plan"]]
-    sub_id = f"PHSUB_{vendor['id']}_{int(time.time())}"
-    # Approving the mandate collects month one immediately, then recurs. Only
-    # defer the first debit when the vendor has already paid for a period that
-    # is still running, so nobody is billed twice for the same month.
-    first_charge = None
-    if vendor.get("renews_at"):
-        r = vendor["renews_at"]
-        if isinstance(r, str):
-            try:
-                r = datetime.fromisoformat(r)
-            except ValueError:
-                r = None
-        # Cashfree requires a future date; leave a day's margin.
-        if r and r > datetime.now() + timedelta(days=1):
-            first_charge = r.strftime("%Y-%m-%dT%H:%M:%S+05:30")
+    period, interval = AUTOPAY_INTERVAL[vendor["plan"]]
 
-    res = cashfree_subs.create_subscription(
-        config.PLATFORM_CASHFREE_APP_ID,
-        config.PLATFORM_CASHFREE_SECRET_KEY,
-        config.PLATFORM_CASHFREE_ENV,
-        subscription_id=sub_id,
-        amount=amount,
-        interval_type=interval_type,
-        intervals=intervals,
-        customer_email=vendor.get("email"),
-        customer_phone=vendor.get("phone"),
-        return_url=f"{request.url_root}vendor/autopay/return",
-        first_charge_time=first_charge,
-        note=f"PrintHub {vendor['plan']} renewal for {vendor['shop_name']}",
+    # A plan is the recurring price; reuse this vendor's if they have one, so
+    # re-enabling autopay does not litter the account with duplicate plans.
+    plan_id = vendor.get("autopay_plan_id")
+    if not plan_id:
+        pres = rzp.create_plan(
+            config.PLATFORM_RAZORPAY_KEY_ID,
+            config.PLATFORM_RAZORPAY_KEY_SECRET,
+            amount=amount, period=period, interval=interval,
+            name=f"PrintHub {vendor['plan']} plan")
+        if not pres["success"]:
+            flash(f"Could not start autopay: {pres.get('error', 'unknown error')}")
+            return redirect(url_for("vendor_dashboard"))
+        plan_id = pres["plan_id"]
+        db.update_vendor(vendor["id"], {"autopay_plan_id": plan_id})
+
+    # total_count is how many cycles the mandate may run before the vendor
+    # re-authorises. 120 months is a decade — effectively open-ended.
+    res = rzp.create_subscription(
+        config.PLATFORM_RAZORPAY_KEY_ID,
+        config.PLATFORM_RAZORPAY_KEY_SECRET,
+        plan_id=plan_id,
+        total_count=AUTOPAY_TOTAL_COUNT,
+        notes={"vendor_id": vendor["id"], "shop": vendor["shop_name"]},
     )
-    if not res["success"] or not res.get("session_id"):
+    if not res["success"] or not res.get("subscription_id"):
         flash(f"Could not start autopay: {res.get('error', 'unknown error')}")
         return redirect(url_for("vendor_dashboard"))
 
     db.update_vendor(vendor["id"], {
         "autopay_subscription_id": res["subscription_id"],
-        "autopay_status": res.get("status") or "INITIALIZED",
+        "autopay_status": (res.get("status") or "created").lower(),
     })
     db.log_activity("vendor", "autopay_started",
                     f"mandate {res['subscription_id']} for ₹{amount} "
-                    f"per {interval_type.lower()}", vendor_id=vendor["id"])
+                    f"per {period}", vendor_id=vendor["id"])
     return render_template("autopay.html", vendor=vendor, amount=amount,
-                           interval=interval_type.lower(),
-                           session_id=res["session_id"],
-                           cf_env=config.PLATFORM_CASHFREE_ENV,
-                           first_charge=first_charge)
+                           interval=period,
+                           subscription_id=res["subscription_id"],
+                           key_id=res["key_id"])
 
 
 @app.route("/vendor/autopay/return")
 @vendor_required
 def vendor_autopay_return(vendor):
-    """Where Cashfree sends the vendor after they approve the mandate. The
+    """Where Razorpay sends the vendor after they approve the mandate. The
     webhook is authoritative; this just reports what the API says now."""
     sub_id = vendor.get("autopay_subscription_id")
     status = None
     if sub_id:
-        d = cashfree_subs.fetch_subscription(
-            config.PLATFORM_CASHFREE_APP_ID,
-            config.PLATFORM_CASHFREE_SECRET_KEY,
-            config.PLATFORM_CASHFREE_ENV, sub_id) or {}
-        status = (d.get("subscription_status") or "").upper()
+        d = rzp.fetch_subscription(config.PLATFORM_RAZORPAY_KEY_ID,
+                                   config.PLATFORM_RAZORPAY_KEY_SECRET,
+                                   sub_id) or {}
+        status = (d.get("status") or "").lower()
         if status:
             db.update_vendor(vendor["id"], {
                 "autopay_status": status,
-                "autopay_next_charge": d.get("next_schedule_date"),
+                "autopay_next_charge": _charge_at_text(d.get("charge_at")),
             })
-    if status == "ACTIVE":
+    # 'authenticated' means the mandate is approved and the first charge is
+    # on its way; 'active' means the billing cycle has started.
+    if status in ("active", "authenticated"):
         flash("Autopay is on — your renewal will be paid automatically.")
-    elif status in ("BANK_APPROVAL_PENDING", "INITIALIZED"):
-        flash("Autopay is being confirmed by your bank. This can take a "
-              "little while; the dashboard will update on its own.")
+    elif status == "created":
+        flash("Autopay is still being confirmed. This can take a little "
+              "while; the dashboard will update on its own.")
     else:
         flash("Autopay was not set up. You can try again or keep renewing "
               "manually.")
@@ -1233,13 +1233,11 @@ def vendor_autopay_return(vendor):
 def vendor_autopay_cancel(vendor):
     sub_id = vendor.get("autopay_subscription_id")
     if sub_id:
-        cashfree_subs.cancel_subscription(
-            config.PLATFORM_CASHFREE_APP_ID,
-            config.PLATFORM_CASHFREE_SECRET_KEY,
-            config.PLATFORM_CASHFREE_ENV, sub_id)
+        rzp.cancel_subscription(config.PLATFORM_RAZORPAY_KEY_ID,
+                                config.PLATFORM_RAZORPAY_KEY_SECRET, sub_id)
         db.log_activity("vendor", "autopay_cancelled", f"mandate {sub_id}",
                         vendor_id=vendor["id"])
-    db.update_vendor(vendor["id"], {"autopay_status": "CANCELLED",
+    db.update_vendor(vendor["id"], {"autopay_status": "cancelled",
                                     "autopay_next_charge": None})
     flash("Autopay turned off. Remember to renew manually before your "
           "subscription expires.")
@@ -1248,16 +1246,16 @@ def vendor_autopay_cancel(vendor):
 
 @app.route("/payment/webhook/autopay", methods=["POST"])
 def autopay_webhook():
-    """Cashfree tells us about mandate authorisation and every automatic
+    """Razorpay tells us about mandate authorisation and every automatic
     debit. A successful recurring charge extends the subscription exactly as
     a manual renewal would."""
-    raw = request.get_data(as_text=True)
-    if not cashfree.verify_webhook(config.PLATFORM_CASHFREE_WEBHOOK_SECRET,
-                                   request.headers, raw):
+    raw = request.get_data()          # RAW bytes — re-serialising breaks the HMAC
+    if not rzp.verify_webhook(config.PLATFORM_RAZORPAY_WEBHOOK_SECRET,
+                              request.headers, raw):
         print("[webhook/autopay] REJECTED: bad signature")
         return jsonify({"error": "invalid signature"}), 401
 
-    ev = cashfree_subs.parse_webhook(raw)
+    ev = rzp.parse_webhook(raw)
     sub_id = ev.get("subscription_id")
     if not sub_id:
         return jsonify({"status": "ignored"}), 200
@@ -1269,27 +1267,36 @@ def autopay_webhook():
     fields = {}
     if ev.get("subscription_status"):
         fields["autopay_status"] = ev["subscription_status"]
-    if ev.get("next_schedule_date"):
-        fields["autopay_next_charge"] = ev["next_schedule_date"]
+    if ev.get("charge_at"):
+        fields["autopay_next_charge"] = _charge_at_text(ev["charge_at"])
 
-    etype = ev.get("type")
-    if etype == cashfree_subs.EVENT_AUTH:
-        ok = ev.get("authorization_status") in ("SUCCESS", "ACTIVE")
-        fields["autopay_status"] = "ACTIVE" if ok else "AUTH_FAILED"
-        db.log_activity("system", "autopay_authorised" if ok else "autopay_auth_failed",
-                        f"mandate {sub_id}", vendor_id=vendor["id"])
-    elif etype == cashfree_subs.EVENT_PAID and ev.get("payment_status") == "SUCCESS":
-        # The whole point: an automatic debit renews the subscription.
+    event = ev.get("event")
+    if event == rzp.EVENT_SUB_CHARGED:
+        # The whole point: every automatic debit renews the subscription.
+        # This covers the first charge at authorisation too, since Razorpay
+        # keeps that one rather than refunding it.
         billing.record_renewal_payment(vendor, method="autopay",
                                        reference=str(ev.get("payment_id") or sub_id))
         db.log_activity("system", "autopay_charged",
                         f"₹{ev.get('payment_amount')} debited automatically "
                         f"(mandate {sub_id})", vendor_id=vendor["id"])
-    elif etype == cashfree_subs.EVENT_FAILED:
+    elif event == rzp.EVENT_SUB_AUTHENTICATED:
+        db.log_activity("system", "autopay_authorised", f"mandate {sub_id}",
+                        vendor_id=vendor["id"])
+    elif event == rzp.EVENT_SUB_PENDING:
+        # A debit failed; Razorpay will retry before giving up.
         db.log_activity("system", "autopay_failed",
-                        f"automatic debit failed: "
-                        f"{ev.get('failure_reason') or 'unknown'} — the vendor "
-                        f"must renew manually", vendor_id=vendor["id"])
+                        f"automatic debit failed on mandate {sub_id} — "
+                        f"Razorpay will retry", vendor_id=vendor["id"])
+    elif event == rzp.EVENT_SUB_HALTED:
+        db.log_activity("system", "autopay_halted",
+                        f"mandate {sub_id} halted after failed retries — the "
+                        f"vendor must renew manually", vendor_id=vendor["id"])
+    elif event == rzp.EVENT_SUB_CANCELLED:
+        fields["autopay_next_charge"] = None
+        db.log_activity("system", "autopay_cancelled",
+                        f"mandate {sub_id} cancelled at Razorpay",
+                        vendor_id=vendor["id"])
 
     if fields:
         db.update_vendor(vendor["id"], fields)
@@ -1351,10 +1358,10 @@ def _finalize_subscription_order(order, success, transaction_id=None,
     vendor = db.get_vendor(order["vendor_id"])
     creds = None
     if order["purpose"] == "first_payment" and vendor["status"] == "pending_payment":
-        creds = billing.record_first_payment(vendor, method="cashfree",
+        creds = billing.record_first_payment(vendor, method="razorpay",
                                              reference=order["order_id"])
     elif order["purpose"] == "renewal":
-        billing.record_renewal_payment(vendor, method="cashfree",
+        billing.record_renewal_payment(vendor, method="razorpay",
                                        reference=order["order_id"])
     db.update_gateway_order(order["order_id"], {
         "status": "paid", "transaction_id": transaction_id,
@@ -1366,7 +1373,7 @@ def _finalize_subscription_order(order, success, transaction_id=None,
 @app.route("/pay/return")
 def pay_return():
     """Vendor lands here after the platform-account checkout. Confirms the
-    order with Cashfree directly (never trusts the redirect)."""
+    order with Razorpay directly (never trusts the redirect)."""
     order_id = request.args.get("order_id", "")
     order = db.get_gateway_order(order_id)
     if not order or order["purpose"] not in ("first_payment", "renewal"):
@@ -1374,11 +1381,11 @@ def pay_return():
                                message="Unknown payment order."), 404
     creds = None
     if order["status"] == "pending":
-        cf_status = cashfree.order_status(
-            config.PLATFORM_CASHFREE_APP_ID, config.PLATFORM_CASHFREE_SECRET_KEY,
-            config.PLATFORM_CASHFREE_ENV, order_id)
+        paid = rzp.fetch_order(config.PLATFORM_RAZORPAY_KEY_ID,
+                               config.PLATFORM_RAZORPAY_KEY_SECRET,
+                               order_id) == "paid"
         status, creds = _finalize_subscription_order(
-            order, cf_status == "PAID", consume_creds=True)
+            order, paid, consume_creds=True)
     else:
         status, creds = _finalize_subscription_order(
             order, order["status"] == "paid", consume_creds=True)
@@ -1407,22 +1414,25 @@ def pay_return():
 
 @app.route("/payment/webhook/platform", methods=["POST"])
 def platform_payment_webhook():
-    """Cashfree webhook for the PLATFORM account (subscriptions/renewals)."""
-    if not cashfree.verify_webhook(config.PLATFORM_CASHFREE_WEBHOOK_SECRET,
-                                   request.headers,
-                                   request.get_data(as_text=True)):
+    """Razorpay webhook for the PLATFORM account (installation/renewals)."""
+    raw = request.get_data()          # RAW bytes — re-serialising breaks the HMAC
+    if not rzp.verify_webhook(config.PLATFORM_RAZORPAY_WEBHOOK_SECRET,
+                              request.headers, raw):
+        print("[webhook/platform] REJECTED: bad signature")
         return jsonify({"error": "invalid signature"}), 401
-    data = request.get_json(silent=True) or {}
-    order_id = data.get("data", {}).get("order", {}).get("order_id")
-    payment = data.get("data", {}).get("payment", {})
+    ev = rzp.parse_webhook(raw)
+    order_id = ev.get("order_id")
     if not order_id:
-        return jsonify({"error": "missing order_id"}), 400
+        return jsonify({"status": "ignored"}), 200
     order = db.get_gateway_order(order_id)
     if not order or order["purpose"] not in ("first_payment", "renewal"):
         return jsonify({"error": "unknown order"}), 404
-    status = payment.get("payment_status", "").upper()
-    _finalize_subscription_order(order, status == "SUCCESS",
-                                 payment.get("cf_payment_id"))
+
+    # Only CAPTURED is money in the account; 'authorized' auto-refunds later.
+    if ev["event"] in (rzp.EVENT_PAYMENT_CAPTURED, rzp.EVENT_ORDER_PAID):
+        _finalize_subscription_order(order, True, ev.get("payment_id"))
+    elif ev["event"] == rzp.EVENT_PAYMENT_FAILED:
+        _finalize_subscription_order(order, False, ev.get("payment_id"))
     return jsonify({"status": "ok"})
 
 
@@ -1462,7 +1472,7 @@ def worker_jobs():
         # Suspended/rejected vendors lose access until payment clears (§8.3).
         return jsonify({"error": f"subscription {vendor['status']}"}), 403
     # Catch payments the browser never confirmed (closed tab, no webhook):
-    # ask Cashfree directly so a paid job still reaches the printer.
+    # ask Razorpay directly so a paid job still reaches the printer.
     try:
         reconcile_pending_orders(vendor_id=vendor["id"])
     except Exception as e:
@@ -1664,7 +1674,7 @@ def admin_create_vendor():
     db.log_activity("admin", "vendor_registered",
                     f"{shop_name} ({plan}); first payment due ₹{amounts['total']}",
                     vendor_id=vendor_id)
-    # Activation happens ONLY through a real Cashfree payment on this link.
+    # Activation happens ONLY through a real Razorpay payment on this link.
     flash(f"Vendor registered. Send them this payment link to activate — "
           f"₹{amounts['total']} (₹{amounts['subscription_fee']} {plan} + "
           f"₹{amounts['installation_fee']} installation): "

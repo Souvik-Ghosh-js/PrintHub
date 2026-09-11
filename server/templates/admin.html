@@ -50,7 +50,7 @@
 <!-- ---------- register ---------- -->
 <div class="card">
   <div class="card-head"><h2>Register a vendor</h2>
-    <span class="muted tiny">Activated only by a real Cashfree payment</span></div>
+    <span class="muted tiny">Activated only by a real Razorpay payment</span></div>
   <form method="post" action="{{ url_for('admin_create_vendor') }}">
     <div class="field-row">
       <div class="field"><label for="v_name">Owner name</label>
@@ -99,7 +99,7 @@
           <td class="tiny">
             {% if v.status == 'pending_payment' %}<span class="muted">awaiting payment</span>
             {% else %}
-              {{ '💳' if v.cashfree_app_id else '⬜' }} payments<br>
+              {{ '💳' if v.razorpay_key_id else '⬜' }} payments<br>
               {{ '💰' if v.price_bw and v.price_bw|float > 0 else '⬜' }} prices
             {% endif %}
           </td>

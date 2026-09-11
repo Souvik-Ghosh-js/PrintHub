@@ -3,7 +3,7 @@
 {% block wrapclass %}wrap-narrow{% endblock %}
 
 {% block head %}
-<script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <style>
   /* ---------- shop header ---------- */
   .shop-hero { display: flex; align-items: center; gap: .85rem; margin-bottom: 1.1rem; }
@@ -184,7 +184,7 @@
 {% endblock %}
 
 {% block brandsub %}{% endblock %}
-{% block nav %}<span class="muted tiny">Secure payment by Cashfree</span>{% endblock %}
+{% block nav %}<span class="muted tiny">Secure payment by Razorpay</span>{% endblock %}
 
 {% block content %}
 <div class="shop-hero">
@@ -1228,9 +1228,19 @@ $("order-btn").addEventListener("click", async () => {
     }
     payModal.classList.add("open");
     pollPayment(d.order_id, d.job_id, d.price);
-    new Cashfree({ mode: d.cf_env }).checkout({
-      paymentSessionId: d.payment_session_id, redirectTarget: "_modal",
-    });
+    // The poll above is what confirms payment (backed by the webhook), so
+    // the customer still gets their print if checkout closes unexpectedly.
+    new Razorpay({
+      key: d.key_id,
+      order_id: d.order_id,
+      amount: d.amount_paise,
+      currency: "INR",
+      name: d.shop_name,
+      description: `Print job #${d.job_id}`,
+      theme: { color: "#4f46e5" },
+      handler: function () { /* the poll picks it up */ },
+      modal: { ondismiss: function () { /* keep polling; they may have paid */ } }
+    }).open();
   } catch (e) {
     alert("Network error. Please check your connection and try again.");
   } finally { btn.disabled = false; btn.textContent = label; updatePrice(); }

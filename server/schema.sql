@@ -48,18 +48,28 @@ CREATE TABLE IF NOT EXISTS vendors (
     printer_colour  VARCHAR(255),
     tray_colour     VARCHAR(128),
 
-    -- Per-vendor Cashfree account — EVERY SITE HAS A DIFFERENT ACCOUNT.
+    -- Per-vendor Cashfree account — RETIRED, kept only so a migration can
+    -- still read old values during the Razorpay cutover. Nothing writes these.
     -- Customer print-job payments for this shop go through these keys.
     cashfree_app_id         VARCHAR(128),
     cashfree_secret_key     VARCHAR(128),
     cashfree_webhook_secret VARCHAR(128),
     cashfree_env            VARCHAR(16) NOT NULL DEFAULT 'production',  -- production|sandbox
 
-    -- Autopay mandate (Cashfree Subscriptions). Cashfree holds the mandate;
-    -- we only remember which subscription belongs to this vendor.
+    -- Per-vendor Razorpay account. Customer print-job payments for this shop
+    -- go through these keys. (The cashfree_* columns above are retained only
+    -- so an in-flight migration can still read old values; nothing writes them.)
+    razorpay_key_id         VARCHAR(128),
+    razorpay_key_secret     VARCHAR(128),
+    razorpay_webhook_secret VARCHAR(128),
+
+    -- Autopay mandate (Razorpay Subscriptions). Razorpay holds the mandate
+    -- and raises each debit itself; we only remember which subscription and
+    -- plan belong to this vendor.
     autopay_subscription_id VARCHAR(128),
     autopay_status          VARCHAR(32),
     autopay_next_charge     VARCHAR(64),
+    autopay_plan_id         VARCHAR(128),
 
     created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
@@ -123,7 +133,7 @@ CREATE TABLE IF NOT EXISTS print_jobs (
     price              DECIMAL(10,2) DEFAULT 0.00,
     payment_status     VARCHAR(32)  NOT NULL DEFAULT 'pending',   -- pending|paid|failed
     copies             INT          DEFAULT 1,
-    order_id           VARCHAR(128),         -- Cashfree order (online payments)
+    order_id           VARCHAR(128),         -- Razorpay order (online payments)
     transaction_id     VARCHAR(128),
     paid_at            DATETIME,
     claimed_at         DATETIME,             -- when a worker took the job
@@ -135,7 +145,7 @@ CREATE TABLE IF NOT EXISTS print_jobs (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------
--- Gateway orders — one row per Cashfree order (both the platform
+-- Gateway orders — one row per Razorpay order (both the platform
 -- account and each vendor's own account); drives webhook dispatch.
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS gateway_orders (

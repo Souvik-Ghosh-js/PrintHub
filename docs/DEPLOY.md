@@ -55,18 +55,18 @@ proves MySQL is wired up.
 ## 4. Configure payments
 
 ```bash
-sudo nano /etc/printhub.env      # fill PLATFORM_CASHFREE_* (GOBT's account)
+sudo nano /etc/printhub.env      # fill PLATFORM_RAZORPAY_* (GOBT's account)
 sudo systemctl restart printhub
 ```
 
 - **Platform account** (vendor subscription money): set the three
-  `PLATFORM_CASHFREE_*` values. In that Cashfree dashboard set the webhook
+  `PLATFORM_RAZORPAY_*` values. In that Razorpay dashboard set the webhook
   to `http://<STATIC_IP>/payment/webhook/platform` (switch to the https://
   domain URL later). Until these are set, activate vendors manually from
   the admin panel ("Record first payment").
 - **Vendor accounts** (print-job money): nothing to do server-side — each
   vendor enters their own keys on their dashboard, webhook
-  `…/payment/webhook/vendor`. Every site has a different Cashfree account.
+  `…/payment/webhook/vendor`. Every shop has a different Razorpay account.
 
 ## 5. First-run walkthrough
 
@@ -74,7 +74,7 @@ sudo systemctl restart printhub
 2. Register a vendor (choose plan + shop code; the code becomes their URL:
    `http://<STATIC_IP>/<code>`).
 3. Activate: either send them the `/pay/onboard/<code>` link (online first
-   payment via the platform Cashfree account) or click **Record first
+   payment via the platform Razorpay account) or click **Record first
    payment + activate**. Credentials appear once — deliver them.
 4. Open the **QR poster** for the vendor and get it to their counter.
 5. Shop PC: run the worker (`worker/printhub_worker.py` or the built .exe),
@@ -118,7 +118,7 @@ DOMAIN=yourdomain.com EMAIL=you@example.com \
 That issues the HTTPS cert, redirects HTTP→HTTPS, and rewrites
 `PRINTHUB_BASE_URL` so QR codes and worker file links use
 `https://yourdomain.com/<shop_code>`. Afterwards: **reprint any QR posters**
-issued while on the IP, update both Cashfree webhook URLs to the domain,
+issued while on the IP, update both Razorpay webhook URLs to the domain,
 and point shop-PC workers at `https://yourdomain.com`.
 
 ## Day-2 operations

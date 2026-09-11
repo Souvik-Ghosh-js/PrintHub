@@ -39,6 +39,12 @@ CALL ph_add_column('vendors', 'cashfree_secret_key',     'VARCHAR(128)');
 CALL ph_add_column('vendors', 'cashfree_webhook_secret', 'VARCHAR(128)');
 CALL ph_add_column('vendors', 'cashfree_env',            "VARCHAR(16) NOT NULL DEFAULT 'production'");
 
+-- Per-vendor Razorpay account (replaces Cashfree)
+CALL ph_add_column('vendors', 'razorpay_key_id',         'VARCHAR(128)');
+CALL ph_add_column('vendors', 'razorpay_key_secret',     'VARCHAR(128)');
+CALL ph_add_column('vendors', 'razorpay_webhook_secret', 'VARCHAR(128)');
+CALL ph_add_column('vendors', 'autopay_plan_id',         'VARCHAR(128)');
+
 -- Online payment tracking on print jobs
 CALL ph_add_column('print_jobs', 'order_id',       'VARCHAR(128)');
 CALL ph_add_column('print_jobs', 'transaction_id', 'VARCHAR(128)');

@@ -69,12 +69,12 @@ PRINTHUB_BASE_URL=http://${PUBLIC_IP}
 PRINTHUB_SECRET_KEY=${SECRET_KEY}
 PRINTHUB_ADMIN_USER=admin
 PRINTHUB_ADMIN_PASSWORD=${ADMIN_PASSWORD}
-# Platform Cashfree account (GOBT's own) — vendor subscription payments.
+# Platform Razorpay account (GOBT's own) — vendor subscription payments.
+# Razorpay has no environment flag: test and live are separate key pairs.
 # Fill these in, then: sudo systemctl restart printhub
-PLATFORM_CASHFREE_APP_ID=
-PLATFORM_CASHFREE_SECRET_KEY=
-PLATFORM_CASHFREE_WEBHOOK_SECRET=
-PLATFORM_CASHFREE_ENV=production
+PLATFORM_RAZORPAY_KEY_ID=
+PLATFORM_RAZORPAY_KEY_SECRET=
+PLATFORM_RAZORPAY_WEBHOOK_SECRET=
 ENV
   sudo chmod 600 "$ENV_FILE"
   echo "    generated new secrets (admin password shown at the end)"
@@ -165,7 +165,7 @@ cat <<NOTE
  1. Lightsail firewall: open port 80 (and 443 for later).
  2. Log in to /admin/login -> register a vendor -> activate ->
     hand over credentials + QR poster.
- 3. Platform Cashfree keys: sudo nano ${ENV_FILE}
+ 3. Platform Razorpay keys: sudo nano ${ENV_FILE}
     then: sudo systemctl restart printhub
  4. When the domain is connected:  bash ${APP_DIR}/deploy/setup_https.sh
     (sets HTTPS + rewrites PRINTHUB_BASE_URL so QR codes use the domain)

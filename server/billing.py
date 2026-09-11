@@ -1,6 +1,6 @@
 """Billing + subscription lifecycle (spec §5, §6, §8.3).
 
-Payment model: ONLINE ONLY. Money is collected through Cashfree — vendor
+Payment model: ONLINE ONLY. Money is collected through Razorpay — vendor
 subscriptions/renewals on the platform account, customer print jobs on each
 vendor's own account. The functions here are called by app.py only after a
 gateway payment is confirmed (webhook or verified order status); they never
@@ -29,7 +29,7 @@ def awaiting_mandate(vendor) -> bool:
     grace, but they need opposite messages."""
     if not vendor or not uses_autopay(vendor.get("plan", "")):
         return False
-    if (vendor.get("autopay_status") or "").upper() == "ACTIVE":
+    if (vendor.get("autopay_status") or "").lower() in ("active", "authenticated"):
         return False
     try:
         return not any(p["kind"] in ("subscription", "renewal")
@@ -87,7 +87,7 @@ def _next_renewal(plan: str, start: datetime):
     return (start + timedelta(days=period)) if period else None  # lifetime: never
 
 
-def record_first_payment(vendor, method="cashfree", reference=None):
+def record_first_payment(vendor, method="razorpay", reference=None):
     """First combined payment (subscription + installation), CONFIRMED by the
     gateway: activates the vendor and generates their credentials. Returns the
     plaintext credentials (shown ONCE for delivery; only the hash is stored)."""
@@ -126,7 +126,7 @@ def record_first_payment(vendor, method="cashfree", reference=None):
     return {"login_id": login_id, "password": password, **amounts}
 
 
-def record_renewal_payment(vendor, method="cashfree", reference=None):
+def record_renewal_payment(vendor, method="razorpay", reference=None):
     """Renewal payment CONFIRMED by the gateway: extends the subscription one
     period and reactivates the vendor whatever state they were in
     (grace/suspended/rejected)."""

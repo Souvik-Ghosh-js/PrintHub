@@ -59,7 +59,7 @@ cat <<NOTE
   - Vendors' QR posters generated BEFORE this change encode the
     old IP URL — reprint them from the admin panel / vendor
     dashboard (the QR endpoint now uses the domain).
-  - Cashfree webhook URLs:
+  - Razorpay webhook URLs:
       platform  -> https://${DOMAIN}/payment/webhook/platform
       vendors   -> https://${DOMAIN}/payment/webhook/vendor
   - Shop-PC workers: set the server URL to https://${DOMAIN}
