@@ -11,3 +11,8 @@ server/downloads/
 
 # local dev database
 server/printhub.sqlite
+
+# local env (never commit - holds API secrets)
+.env
+*.env
+!.env.example

@@ -112,6 +112,18 @@ def index():
                            install_fee=config.INSTALLATION_FEE)
 
 
+def _landing_error(message, code):
+    """Render the landing page carrying a message.
+
+    landing.html always needs stats/plans/install_fee for its live-stats and
+    pricing sections; rendering it without them raises UndefinedError and
+    turns a friendly 503 into a 500. Route every error render through here.
+    """
+    return render_template("landing.html", shops=[], error=message,
+                           stats=db.platform_stats(), plans=config.PLANS,
+                           install_fee=config.INSTALLATION_FEE), code
+
+
 def _vendor_gateway_ready(vendor) -> bool:
     """True if this shop's OWN Razorpay account is configured (per-shop keys)."""
     return rzp.configured(vendor.get("razorpay_key_id"),
@@ -122,15 +134,13 @@ def _vendor_gateway_ready(vendor) -> bool:
 def shop(code):
     vendor = billing.refresh_status(db.get_vendor_by_code(code))
     if not billing.has_access(vendor):
-        return render_template("landing.html", shops=[],
-                               error="This shop is not available right now."), 404
+        return _landing_error("This shop is not available right now.", 404)
     # Payment is online-only, so a shop is only orderable once it has its own
     # Razorpay account AND real prices set.
     if not _vendor_gateway_ready(vendor) or float(vendor.get("price_bw") or 0) <= 0:
-        return render_template(
-            "landing.html", shops=[],
-            error=f"{vendor['shop_name']} is still finishing setup and can't "
-                  f"take orders yet. Please ask at the counter."), 503
+        return _landing_error(
+            f"{vendor['shop_name']} is still finishing setup and can't "
+            f"take orders yet. Please ask at the counter.", 503)
     return render_template("customer.html", vendor=vendor,
                            formats=config.DOC_FORMATS)
 
@@ -148,8 +158,7 @@ RESERVED_CODES = {"shop", "vendor", "admin", "worker", "api", "files", "qr",
 @app.route("/<code>")
 def shop_short(code):
     if code in RESERVED_CODES:
-        return render_template("landing.html", shops=[],
-                               error="This shop is not available right now."), 404
+        return _landing_error("This shop is not available right now.", 404)
     return shop(code)
 
 
