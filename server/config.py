@@ -16,8 +16,14 @@ SECRET_KEY = os.environ.get("PRINTHUB_SECRET_KEY", "CHANGE_ME_printhub_flask_sec
 # The key id itself says which one is in use (rzp_test_* vs rzp_live_*).
 PLATFORM_RAZORPAY_KEY_ID = os.environ.get("PLATFORM_RAZORPAY_KEY_ID", "")
 PLATFORM_RAZORPAY_KEY_SECRET = os.environ.get("PLATFORM_RAZORPAY_KEY_SECRET", "")
-# Set per-webhook in the Razorpay dashboard — NOT the API key secret.
+# Set per-webhook in the Razorpay dashboard — NOT the API key secret, and
+# each webhook carries its OWN secret, so they are configured separately.
+# The autopay one falls back to the platform value when unset, which covers
+# a dashboard where both webhooks were given the same secret.
 PLATFORM_RAZORPAY_WEBHOOK_SECRET = os.environ.get("PLATFORM_RAZORPAY_WEBHOOK_SECRET", "")
+AUTOPAY_RAZORPAY_WEBHOOK_SECRET = (
+    os.environ.get("AUTOPAY_RAZORPAY_WEBHOOK_SECRET", "")
+    or PLATFORM_RAZORPAY_WEBHOOK_SECRET)
 
 # --- Subscription & pricing model (spec §5, §6) ---
 INSTALLATION_FEE = 2000          # one-time, every vendor, non-recurring

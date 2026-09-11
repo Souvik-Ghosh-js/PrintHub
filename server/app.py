@@ -1259,7 +1259,9 @@ def autopay_webhook():
     debit. A successful recurring charge extends the subscription exactly as
     a manual renewal would."""
     raw = request.get_data()          # RAW bytes — re-serialising breaks the HMAC
-    if not rzp.verify_webhook(config.PLATFORM_RAZORPAY_WEBHOOK_SECRET,
+    # The autopay webhook is a separate endpoint in the Razorpay dashboard
+    # and therefore carries its own secret.
+    if not rzp.verify_webhook(config.AUTOPAY_RAZORPAY_WEBHOOK_SECRET,
                               request.headers, raw):
         print("[webhook/autopay] REJECTED: bad signature")
         return jsonify({"error": "invalid signature"}), 401
