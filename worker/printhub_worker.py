@@ -159,6 +159,19 @@ def printer_is_ready(printer):
     return True, "ready"
 
 
+# A shop printing hundreds of copies by accident wastes a whole tray, and a
+# malformed value must never mean "print forever".
+MAX_COPIES = 50
+
+
+def copies_for(job):
+    """How many copies this job paid for. Always at least 1."""
+    try:
+        return max(1, min(MAX_COPIES, int(job.get("copies") or 1)))
+    except (TypeError, ValueError):
+        return 1
+
+
 def configure_printer_settings(printer, job, tray_name):
     h = win32print.OpenPrinter(printer, {"DesiredAccess": win32print.PRINTER_ALL_ACCESS})
     props = win32print.GetPrinter(h, 2)
@@ -170,6 +183,16 @@ def configure_printer_settings(printer, job, tray_name):
     paper_map = {"A4": 9, "A3": 8, "Letter": 1}
     if job.get("paper_size") in paper_map:
         devmode.PaperSize = paper_map[job["paper_size"]]
+
+    # The customer paid per copy, so print that many. A driver ignores any
+    # DEVMODE member whose dmFields bit is not set, so the bits must be
+    # turned on explicitly -- without this the value is silently dropped and
+    # exactly one copy comes out.
+    devmode.Copies = copies_for(job)
+    devmode.Fields |= win32con.DM_COPIES
+    # Collate so a 3-page job x2 comes out 123,123 rather than 112233.
+    devmode.Collate = 1
+    devmode.Fields |= win32con.DM_COLLATE
 
     bin_id = tray_bin_id(printer, tray_name)
     if bin_id is not None:
@@ -204,6 +227,14 @@ def _find_acrobat():
 
 
 def _submit_print(file_path, printer):
+    """Hand the document to Windows ONCE.
+
+    The copy count lives solely in the DEVMODE (see
+    configure_printer_settings). It must not also be applied by submitting
+    repeatedly: on a driver that honours DEVMODE that would multiply out --
+    3 copies becomes 9 -- which is a worse failure than the missing copies
+    it would be guarding against.
+    """
     acro = _find_acrobat()
     if acro:
         subprocess.Popen([acro, "/t", file_path, printer],
