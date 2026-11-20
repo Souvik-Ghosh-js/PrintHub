@@ -57,8 +57,16 @@ def vendor_required(f):
         if not vendor:
             session.pop("vendor_id", None)
             return redirect(url_for("vendor_login"))
+        if vendor["status"] in billing.ADMIN_DISABLED:
+            session.pop("vendor_id", None)
+            flash(DISABLED_MESSAGE)
+            return redirect(url_for("vendor_login"))
         return f(vendor, *args, **kwargs)
     return wrapper
+
+
+DISABLED_MESSAGE = ("This shop has been disabled by PrintHub. Please contact "
+                    "us to restore it.")
 
 
 def admin_required(f):
@@ -962,9 +970,8 @@ def vendor_login():
         if (vendor and vendor.get("password_hash")
                 and check_password_hash(vendor["password_hash"], password)):
             vendor = billing.refresh_status(vendor)
-            if vendor["status"] == "rejected":
-                flash("Your subscription was rejected. Contact support to "
-                      "clear payment and restore access.")
+            if vendor["status"] in billing.ADMIN_DISABLED:
+                flash(DISABLED_MESSAGE)
             else:
                 session["vendor_id"] = vendor["id"]
                 db.log_activity("vendor", "login", "web portal",
@@ -1382,6 +1389,9 @@ def pay_onboard(code):
     if not vendor:
         return render_template("pay_result.html", ok=False,
                                message="Unknown shop code."), 404
+    if vendor["status"] in billing.ADMIN_DISABLED:
+        return render_template("pay_result.html", ok=False,
+                               message=DISABLED_MESSAGE)
     if vendor["status"] != "pending_payment":
         return render_template("pay_result.html", ok=False,
                                message="This vendor is already activated — "
@@ -1754,29 +1764,96 @@ def admin_create_vendor():
     return redirect(url_for("admin_panel"))
 
 
-@app.route("/admin/vendors/<int:vendor_id>/decide", methods=["POST"])
+def _cancel_autopay(vendor, why):
+    """Stop a vendor's mandate so a disabled or deleted shop is never
+    debited. Cancellation is final at Razorpay; the vendor can approve a new
+    mandate after being enabled again."""
+    sub_id = vendor.get("autopay_subscription_id")
+    status = (vendor.get("autopay_status") or "").lower()
+    if not sub_id or status in ("cancelled", "completed", "expired"):
+        return
+    res = rzp.cancel_subscription(config.PLATFORM_RAZORPAY_KEY_ID,
+                                  config.PLATFORM_RAZORPAY_KEY_SECRET, sub_id)
+    db.log_activity("admin", "autopay_cancelled",
+                    f"mandate {sub_id} cancelled ({why})"
+                    + ("" if res.get("success") else
+                       f" — Razorpay said: {res.get('error')}"),
+                    vendor_id=vendor["id"])
+    db.update_vendor(vendor["id"], {"autopay_status": "cancelled",
+                                    "autopay_next_charge": None})
+
+
+@app.route("/admin/vendors/<int:vendor_id>/disable", methods=["POST"])
 @admin_required
-def admin_decide(vendor_id):
-    """After the grace period the admin manually approves or rejects the
-    vendor's continued subscription (spec §8.3)."""
+def admin_disable_vendor(vendor_id):
+    """Take a shop offline by hand: customers can't order, the shop app
+    stops printing and the owner can't sign in. Billing never undoes this;
+    only Enable does. Autopay is cancelled so they are not charged."""
     vendor = db.get_vendor(vendor_id)
-    decision = request.form.get("decision")
-    if not vendor or decision not in ("approve", "reject"):
-        flash("Invalid request.")
+    if not vendor:
+        flash("Vendor not found.")
         return redirect(url_for("admin_panel"))
-    if decision == "approve":
-        db.update_vendor(vendor_id, {"status": "active"})
-        db.log_activity("admin", "subscription_approved",
-                        "continued access approved after grace period",
-                        vendor_id=vendor_id)
-        flash(f"{vendor['shop_name']} approved — access restored.")
-    else:
-        db.update_vendor(vendor_id, {"status": "rejected"})
-        db.log_activity("admin", "subscription_rejected",
-                        "access revoked until payment is cleared",
-                        vendor_id=vendor_id)
-        flash(f"{vendor['shop_name']} rejected — access revoked until "
-              f"payment is cleared.")
+    if vendor["status"] in billing.ADMIN_DISABLED:
+        flash(f"{vendor['shop_name']} is already disabled.")
+        return redirect(url_for("admin_panel"))
+    had_autopay = (vendor.get("autopay_status") or "").lower() not in (
+        "", "cancelled", "completed", "expired")
+    _cancel_autopay(vendor, "vendor disabled by admin")
+    db.update_vendor(vendor_id, {"status": "disabled"})
+    db.log_activity("admin", "vendor_disabled",
+                    f"{vendor['shop_name']} disabled (was {vendor['status']})",
+                    vendor_id=vendor_id)
+    flash(f"{vendor['shop_name']} disabled — the shop is offline"
+          + (" and its autopay was cancelled." if had_autopay else "."))
+    return redirect(url_for("admin_panel"))
+
+
+@app.route("/admin/vendors/<int:vendor_id>/enable", methods=["POST"])
+@admin_required
+def admin_enable_vendor(vendor_id):
+    """Undo Disable. The vendor returns to whatever their payments entitle
+    them to: never paid -> pending payment; paid up -> active; overdue ->
+    grace/suspended, exactly as if they had never been disabled."""
+    vendor = db.get_vendor(vendor_id)
+    if not vendor or vendor["status"] not in billing.ADMIN_DISABLED:
+        flash("That vendor is not disabled.")
+        return redirect(url_for("admin_panel"))
+    status = "active" if vendor.get("login_id") else "pending_payment"
+    db.update_vendor(vendor_id, {"status": status, "grace_until": None})
+    vendor = billing.refresh_status(db.get_vendor(vendor_id))
+    db.log_activity("admin", "vendor_enabled",
+                    f"{vendor['shop_name']} enabled (now {vendor['status']})",
+                    vendor_id=vendor_id)
+    note = {"active": "the shop is live again.",
+            "pending_payment": "they still need to pay the onboarding link.",
+            "grace": "today is their last day to pay.",
+            "suspended": "but their fee is unpaid, so the shop stays offline "
+                         "until they pay."}.get(vendor["status"], "")
+    flash(f"{vendor['shop_name']} enabled — {note}")
+    return redirect(url_for("admin_panel"))
+
+
+@app.route("/admin/vendors/<int:vendor_id>/delete", methods=["POST"])
+@admin_required
+def admin_delete_vendor(vendor_id):
+    """Permanently remove a vendor, their print jobs and files. Requires the
+    shop code typed back as confirmation. Payment records and the activity
+    log are kept for the accounts."""
+    vendor = db.get_vendor(vendor_id)
+    if not vendor:
+        flash("Vendor not found.")
+        return redirect(url_for("admin_panel"))
+    if request.form.get("confirm_code", "").strip().lower() != vendor["shop_code"]:
+        flash(f"Not deleted — type the shop code '{vendor['shop_code']}' "
+              f"exactly to confirm.")
+        return redirect(url_for("admin_panel"))
+    _cancel_autopay(vendor, "vendor deleted by admin")
+    db.delete_vendor(vendor_id)
+    db.log_activity("admin", "vendor_deleted",
+                    f"{vendor['shop_name']} (/{vendor['shop_code']}, "
+                    f"{vendor['plan']}, login {vendor.get('login_id') or '—'}) "
+                    f"deleted with its print jobs; payments kept")
+    flash(f"{vendor['shop_name']} deleted.")
     return redirect(url_for("admin_panel"))
 
 

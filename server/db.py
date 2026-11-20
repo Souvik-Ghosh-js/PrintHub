@@ -272,6 +272,20 @@ def list_vendors():
     return query("SELECT * FROM vendors ORDER BY created_at DESC")
 
 
+def delete_vendor(vendor_id):
+    """Remove a vendor and everything that only exists for them: print jobs
+    (and their stored files) and gateway orders. Payments and the activity
+    log are KEPT — they are the platform's money and audit trail."""
+    for row in query("SELECT storage_key FROM print_jobs WHERE vendor_id = %s",
+                     (vendor_id,)):
+        if row.get("storage_key"):
+            storage_remove(row["storage_key"])
+    execute("DELETE FROM print_jobs WHERE vendor_id = %s", (vendor_id,))
+    execute("DELETE FROM gateway_orders WHERE vendor_id = %s", (vendor_id,))
+    rowcount, _ = execute("DELETE FROM vendors WHERE id = %s", (vendor_id,))
+    return rowcount
+
+
 # ---------------------------------------------------------------------------
 # Payments + activity log
 # ---------------------------------------------------------------------------

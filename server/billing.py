@@ -88,6 +88,12 @@ def first_payment(plan: str) -> dict:
             "total": p["fee"] + INSTALLATION_FEE}
 
 
+# Statuses an administrator set by hand. Billing never moves a vendor out
+# of them — a payment still extends the paid period, but only the admin's
+# Enable brings the shop back. ('rejected' is the older name for this.)
+ADMIN_DISABLED = ("disabled", "rejected")
+
+
 def renewal_amount(plan: str) -> int:
     """Amount for subsequent periods (no installation fee repeated)."""
     return PLANS[plan]["fee"]
@@ -247,8 +253,8 @@ def record_first_payment(vendor, method="razorpay", reference=None):
 def record_renewal_payment(vendor, method="razorpay", reference=None,
                            amount=None):
     """Renewal payment CONFIRMED by the gateway: extends the subscription one
-    period and reactivates the vendor whatever state they were in
-    (grace/suspended/rejected).
+    period and reactivates the vendor from grace/suspended. A vendor the
+    admin disabled stays disabled (the paid period is still extended).
 
     Idempotent on `reference`: Razorpay redelivers webhooks, and the same
     autopay debit must never extend the subscription twice. Returns the
@@ -261,11 +267,10 @@ def record_renewal_payment(vendor, method="razorpay", reference=None,
                        "plan": vendor["plan"], "amount": amount,
                        "status": "paid", "method": method, "reference": reference})
     new_renews = _period_end(vendor["plan"], vendor.get("renews_at"), now())
-    db.update_vendor(vendor["id"], {
-        "status": "active",
-        "renews_at": new_renews,
-        "grace_until": None,
-    })
+    fields = {"renews_at": new_renews, "grace_until": None}
+    if vendor.get("status") not in ADMIN_DISABLED:
+        fields["status"] = "active"
+    db.update_vendor(vendor["id"], fields)
     db.log_activity("system", "renewal_paid",
                     f"amount {amount} ({method}); paid until "
                     f"{new_renews:%Y-%m-%d}" if new_renews else
@@ -283,7 +288,7 @@ def refresh_status(vendor):
 
     Returns the vendor row with any status change applied.
     """
-    if not vendor or vendor["status"] in ("pending_payment", "rejected"):
+    if not vendor or vendor["status"] in ("pending_payment",) + ADMIN_DISABLED:
         return vendor
     if vendor["plan"] == "lifetime" or not vendor.get("renews_at"):
         return vendor  # lifetime never expires

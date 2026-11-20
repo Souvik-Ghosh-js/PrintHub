@@ -94,7 +94,7 @@
           <td>{{ v.plan }}</td>
           <td><span class="pill {{ 'pill-ok' if v.status == 'active'
                                   else 'pill-warn' if v.status == 'grace'
-                                  else 'pill-bad' if v.status in ('suspended','rejected')
+                                  else 'pill-bad' if v.status in ('suspended','rejected','disabled')
                                   else 'pill-neutral' }}">{{ v.status.replace('_',' ') }}</span></td>
           <td class="tiny">
             {% if v.status == 'pending_payment' %}<span class="muted">awaiting payment</span>
@@ -109,18 +109,23 @@
               {% if v.status == 'pending_payment' %}
                 <a class="btn btn-ghost btn-sm" target="_blank"
                    href="{{ url_for('pay_onboard', code=v.shop_code) }}">Open pay link</a>
-              {% else %}
+              {% elif v.status not in ('disabled', 'rejected') %}
                 <a class="btn btn-ghost btn-sm" target="_blank"
                    href="{{ url_for('shop_qr_poster', vendor_id=v.id) }}">QR</a>
-                {% if v.status in ('suspended', 'grace', 'rejected') %}
-                  <form method="post" action="{{ url_for('admin_decide', vendor_id=v.id) }}">
-                    <input type="hidden" name="decision" value="approve">
-                    <button class="btn btn-success btn-sm" type="submit">Approve</button></form>
-                  <form method="post" action="{{ url_for('admin_decide', vendor_id=v.id) }}">
-                    <input type="hidden" name="decision" value="reject">
-                    <button class="btn btn-danger btn-sm" type="submit">Reject</button></form>
-                {% endif %}
               {% endif %}
+              {% if v.status in ('disabled', 'rejected') %}
+                <form method="post" action="{{ url_for('admin_enable_vendor', vendor_id=v.id) }}">
+                  <button class="btn btn-success btn-sm" type="submit">Enable</button></form>
+              {% else %}
+                <form method="post" action="{{ url_for('admin_disable_vendor', vendor_id=v.id) }}"
+                      onsubmit="return confirm('Disable {{ v.shop_name|e }}? The shop goes offline and its autopay is cancelled.');">
+                  <button class="btn btn-ghost btn-sm" type="submit">Disable</button></form>
+              {% endif %}
+              <form method="post" action="{{ url_for('admin_delete_vendor', vendor_id=v.id) }}"
+                    data-code="{{ v.shop_code }}" data-name="{{ v.shop_name }}"
+                    onsubmit="return confirmDelete(this);">
+                <input type="hidden" name="confirm_code" value="">
+                <button class="btn btn-danger btn-sm" type="submit">Delete</button></form>
             </div>
             {% if v.status == 'pending_payment' %}
             <div class="muted paylink">{{ base_url }}/pay/onboard/{{ v.shop_code }}</div>
@@ -135,9 +140,12 @@
   </div>
   <p class="muted tiny" style="margin:.8rem 0 0;">Monthly vendors are due on
     the 1st (autopay debits on the 27th; reminder emails go out daily from the
-    27th) and are disabled if still unpaid at the end of the 1st. Yearly
-    vendors get a 15-day grace period. Disabled vendors come back the moment
-    they pay; rejected vendors lose all access until they pay.</p>
+    27th) and go offline if still unpaid at the end of the 1st, coming back
+    the moment they pay. Yearly vendors get a 15-day grace period.
+    <strong>Disable</strong> takes a shop offline by hand (payments don't undo
+    it — only Enable does) and cancels its autopay. <strong>Delete</strong>
+    removes the vendor and their print jobs for good; payment records are
+    kept.</p>
 </div>
 
 <div class="grid2">
@@ -149,7 +157,7 @@
         <tbody>
         {% for p in payments %}
           <tr><td class="muted tiny">{{ p.created_at }}</td>
-              <td>{{ p.shop_name or p.vendor_id }}</td>
+              <td>{{ p.shop_name or ('deleted vendor #' ~ p.vendor_id) }}</td>
               <td>{{ p.kind }}{% if p.plan %} <span class="muted tiny">{{ p.plan }}</span>{% endif %}</td>
               <td>₹{{ '%.2f'|format(p.amount) }}</td>
               <td><span class="pill {{ 'pill-ok' if p.status == 'paid' else 'pill-neutral' }}">{{ p.status }}</span></td></tr>
@@ -180,4 +188,19 @@
     </div>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Deleting is permanent, so the admin types the shop code back. The
+  // server checks it again — this prompt only fills in the field.
+  function confirmDelete(form) {
+    const typed = prompt("Delete " + form.dataset.name + " permanently?\n" +
+      "This removes the vendor and all their print jobs. Payment records are kept.\n\n" +
+      "Type the shop code \"" + form.dataset.code + "\" to confirm:");
+    if (typed === null) return false;
+    form.querySelector("[name=confirm_code]").value = typed.trim().toLowerCase();
+    return true;
+  }
+</script>
 {% endblock %}

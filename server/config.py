@@ -53,7 +53,7 @@ PLANS = {
     # Monthly runs on the CALENDAR month, not 30 days from signup — see the
     # billing calendar below. period_days is unused for it.
     "monthly":  {"label": "Monthly",  "fee": 194,   "period_days": None},
-    "yearly":   {"label": "Yearly",   "fee": 3600,  "period_days": 365},
+    "yearly":   {"label": "Yearly",   "fee": 1999,  "period_days": 365},
     "lifetime": {"label": "Lifetime", "fee": 20000, "period_days": None},  # no recurring
 }
 GRACE_DAYS = 15                  # yearly renewal grace period (spec §8.3)
