@@ -198,36 +198,63 @@
     <p class="muted">{{ plans[vendor.plan].label }} · ₹{{ plans[vendor.plan].fee }} per
       {{ 'month' if vendor.plan == 'monthly' else 'year' }}
       {% if vendor.renews_at %}· renews {{ vendor.renews_at }}{% endif %}</p>
-    {% if days_left is not none and days_left >= 0 and days_left <= 7
-          and vendor.status == 'active' %}
+    {% set monthly = vendor.plan == 'monthly' %}
+    {% if owes_first_month %}
       <div class="note note-warn" style="margin-bottom:.8rem;">
-        <strong>Renewal due {{ 'today' if days_left == 0 else
-          'in ' ~ days_left ~ ' day' ~ ('' if days_left == 1 else 's') }}</strong>
-        — ₹{{ renewal_amount }} keeps your shop online. Renew below so your
-        customers are never turned away.</div>
-    {% endif %}
-    {% if awaiting_mandate %}
-      <div class="note note-warn" style="margin-bottom:.8rem;">
-        <strong>One step left — turn on autopay.</strong>
-        Your ₹{{ installation_fee }} installation is paid. Approving the
-        mandate below charges your first month of ₹{{ mandate_fee }} and keeps
-        it running automatically after that.</div>
+        <strong>Pay your first month to go live.</strong>
+        Your ₹{{ installation_fee }} installation is paid. Pay
+        ₹{{ renewal_amount }} below for this month, then turn on autopay so
+        every month after is paid on its own.</div>
     {% elif vendor.status == 'grace' %}
       <div class="note note-warn" style="margin-bottom:.8rem;">
-        Payment overdue — you're in the grace period until {{ vendor.grace_until }}.
-        Renew now to avoid suspension.</div>
+        {% if monthly %}<strong>Today is the last day to pay.</strong>
+          Pay ₹{{ renewal_amount }} now — unpaid shops are disabled at midnight.
+        {% else %}Payment overdue — you're in the grace period until
+          {{ vendor.grace_until }}. Renew now to avoid suspension.{% endif %}</div>
     {% elif vendor.status in ('suspended', 'rejected') %}
       <div class="note note-bad" style="margin-bottom:.8rem;">
-        Your shop is offline. Renew to restore service.</div>
+        Your shop is offline because the fee was not paid. Pay
+        ₹{{ renewal_amount }} to restore service immediately.</div>
+    {% elif autopay_failed %}
+      <div class="note note-bad" style="margin-bottom:.8rem;">
+        <strong>Your autopay debit failed.</strong>
+        {% if vendor.autopay_status == 'pending' %}Razorpay will retry, but
+        check your UPI/bank account or pay now.{% else %}Autopay has stopped
+        after repeated failures — pay now and turn autopay on again.{% endif %}
+        Unpaid on the 1st, the shop is disabled.</div>
+    {% elif days_left is not none and days_left >= 0 and days_left <= 5
+          and vendor.status == 'active' and not autopay_on %}
+      <div class="note note-warn" style="margin-bottom:.8rem;">
+        <strong>₹{{ renewal_amount }} due {{ 'today' if days_left == 0 else
+          'in ' ~ days_left ~ ' day' ~ ('' if days_left == 1 else 's') }}</strong>
+        — pay below to keep your shop online{% if monthly %}, or turn on
+        autopay{% endif %}.</div>
     {% endif %}
+    {% if not autopay_on or autopay_outdated or vendor.status != 'active' %}
     <form method="post" action="{{ url_for('vendor_renew_online') }}"
           style="display:inline;">
-      <button type="submit" class="btn btn-success">Renew now — ₹{{ plans[vendor.plan].fee }}</button>
+      <button type="submit" class="btn btn-success">
+        {{ 'Pay now' if monthly else 'Renew now' }} — ₹{{ plans[vendor.plan].fee }}</button>
     </form>
+    {% endif %}
 
     <!-- autopay -->
     <div style="margin-top:1rem; padding-top:1rem; border-top:1px solid var(--line);">
-      {% if autopay_on %}
+      {% if autopay_outdated %}
+        <div class="row-between" style="flex-wrap:wrap; gap:.6rem;">
+          <div>
+            <span class="pill pill-warn">update autopay</span>
+            <span class="muted tiny">Your autopay was set up on the old price
+              and date. Approve it once more so ₹{{ plans[vendor.plan].fee }} is
+              debited on the {{ debit_day }}th of each month — the old one is
+              cancelled automatically.</span>
+          </div>
+          <form method="post" action="{{ url_for('vendor_autopay_start') }}"
+                style="margin:0;">
+            <button type="submit" class="btn btn-primary btn-sm">Update autopay</button>
+          </form>
+        </div>
+      {% elif autopay_on %}
         <div class="row-between" style="flex-wrap:wrap; gap:.6rem;">
           <div>
             <span class="pill pill-ok">autopay on</span>
@@ -250,20 +277,17 @@
         <div class="row-between" style="flex-wrap:wrap; gap:.6rem;">
           <div>
             <strong style="font-size:.92rem;">
-              {% if awaiting_mandate %}Start your monthly plan
-              {% else %}Never lose a day to a missed renewal{% endif %}</strong>
-            <div class="muted tiny">Approve once in your UPI app.
-              {% if awaiting_mandate %}₹{{ mandate_fee }} is charged now for
-                your first month, then automatically every month.
-              {% else %}₹{{ plans[vendor.plan].fee }} is paid automatically
-                each month.{% endif %} Cancel any time.</div>
+              {% if autopay_failed %}Turn autopay on again
+              {% else %}Never lose a day to a missed payment{% endif %}</strong>
+            <div class="muted tiny">Approve once in your UPI app — nothing is
+              charged today. ₹{{ plans[vendor.plan].fee }} is then debited on
+              the {{ debit_day }}th of each month for the month ahead. Cancel
+              any time.</div>
           </div>
           <form method="post" action="{{ url_for('vendor_autopay_start') }}"
                 style="margin:0;">
-            <button type="submit"
-                    class="btn {{ 'btn-success' if awaiting_mandate else 'btn-primary' }} btn-sm">
-              {{ 'Turn on autopay — ₹' ~ mandate_fee if awaiting_mandate
-                 else 'Turn on autopay' }}</button>
+            <button type="submit" class="btn btn-primary btn-sm">
+              Turn on autopay</button>
           </form>
         </div>
       {% else %}

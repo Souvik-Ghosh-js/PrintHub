@@ -1,0 +1,61 @@
+"""Scheduled billing job — run once a day by the printhub-daily systemd timer.
+
+    python jobs.py daily            # sweep statuses, send due emails
+    python jobs.py daily --dry-run  # show who would be emailed, send nothing
+
+Each run:
+  1. sweep_subscriptions() — moves unpaid shops to grace/suspended on time
+     even if nobody opens a page;
+  2. emails every monthly vendor whose coming month is unpaid (27th..1st),
+     and a one-off notice to any vendor just disabled for not paying.
+Safe to run more than once a day: each email is claimed atomically per
+vendor per day (db.claim_billing_email), so nobody is mailed twice.
+"""
+import sys
+
+import billing
+import db
+import notify
+
+
+def run_daily(dry_run=False, at=None):
+    at = at or billing.now()
+    if not dry_run:
+        changed = billing.sweep_subscriptions()
+        print(f"[daily] sweep: {changed} status change(s)")
+    sent = failed = 0
+    for v in db.list_vendors():
+        if not dry_run:
+            v = billing.refresh_status(v)
+        due = billing.billing_email_due(v, at)
+        if not due:
+            continue
+        kind, due_date, key = due
+        if v.get("last_billing_email") == key:
+            continue
+        subject, body = notify.billing_email(v, kind, due_date, at.date())
+        if dry_run:
+            print(f"[daily] would send {kind} to {v['email']} "
+                  f"({v['shop_name']}): {subject}")
+            continue
+        previous = v.get("last_billing_email")
+        if not db.claim_billing_email(v["id"], key):
+            continue   # another run got there first
+        if notify.send(v["email"], subject, body):
+            sent += 1
+            db.log_activity("system", f"email_{kind}",
+                            f"{subject} -> {v['email']}", vendor_id=v["id"])
+        else:
+            failed += 1
+            db.release_billing_email(v["id"], key, previous)
+    print(f"[daily] emails sent: {sent}, failed: {failed}")
+    return sent, failed
+
+
+if __name__ == "__main__":
+    args = sys.argv[1:]
+    if not args or args[0] != "daily":
+        print(__doc__)
+        sys.exit(2)
+    _, failed = run_daily(dry_run="--dry-run" in args)
+    sys.exit(1 if failed else 0)

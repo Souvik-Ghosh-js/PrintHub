@@ -487,6 +487,7 @@
         <li>Your own QR code &amp; shop page</li>
         <li>Auto-printing app for your PC</li>
         <li>Two-printer routing</li>
+        <li>Autopay — never miss a month</li>
         <li>Cancel any time</li>
       </ul>
       <a class="btn btn-ghost btn-block" href="#get-started">Get started</a>
@@ -508,12 +509,12 @@
     <div class="plan">
       <div class="muted tiny" style="font-weight:700;letter-spacing:.06em;">YEARLY</div>
       <div class="amt">₹{{ "{:,}".format(plans.yearly.fee) }}</div>
+      {% set yearly_saving = plans.monthly.fee * 12 - plans.yearly.fee %}
       <div class="per">per year
-        <span class="pill pill-ok" style="margin-left:.3rem;">save
-          ₹{{ "{:,}".format(plans.monthly.fee * 12 - plans.yearly.fee) }}</span></div>
+        {% if yearly_saving > 0 %}<span class="pill pill-ok" style="margin-left:.3rem;">save
+          ₹{{ "{:,}".format(yearly_saving) }}</span>{% endif %}</div>
       <ul>
         <li>Everything in Monthly</li>
-        <li>Two months free vs monthly</li>
         <li>One payment a year</li>
         <li>15-day grace on renewal</li>
       </ul>

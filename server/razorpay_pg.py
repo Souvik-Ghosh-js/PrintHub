@@ -137,15 +137,28 @@ def create_plan(key_id, key_secret, *, amount, period, interval, name):
     return {"success": True, "plan_id": res["data"].get("id")}
 
 
+def fetch_plan(key_id, key_secret, plan_id):
+    res = _request("GET", key_id, key_secret, f"/plans/{plan_id}")
+    return res["data"] if res["success"] else None
+
+
+def plan_amount(plan) -> float:
+    """A fetched plan's price in RUPEES (0 if unknown)."""
+    item = (plan or {}).get("item") or {}
+    return to_rupees(item.get("amount")) if item.get("amount") else 0.0
+
+
 def create_subscription(key_id, key_secret, *, plan_id, total_count,
-                        notes=None, notify=True):
+                        start_at=None, notes=None, notify=True):
     """Create a subscription the customer then authorises.
 
-    start_at is deliberately OMITTED. Razorpay charges the full plan amount
-    at authorisation and keeps it ("In case of immediate start dates, the
-    authentication transaction amount is not refunded"), then recurs on its
-    own schedule. Setting a future start_at instead would take a ₹5
-    auto-refunded validation charge and collect nothing for the first cycle.
+    start_at (unix seconds) pins the FIRST debit to a date of our choosing;
+    every later debit recurs on the same day of the month. With a future
+    start_at, approval only takes a small auto-refunded validation charge
+    and the subscription sits in 'authenticated' until start_at, when the
+    first real debit runs. Without it, Razorpay charges the full plan amount
+    at approval and recurs from that day — which is why PrintHub always
+    passes it: the billing calendar debits on the 27th.
     """
     if not configured(key_id, key_secret):
         return {"success": False, "error": "Razorpay account is not configured."}
@@ -156,6 +169,8 @@ def create_subscription(key_id, key_secret, *, plan_id, total_count,
         "customer_notify": 1 if notify else 0,
         "notes": {k: str(v)[:256] for k, v in (notes or {}).items()},
     }
+    if start_at:
+        payload["start_at"] = int(start_at)
     res = _request("POST", key_id, key_secret, "/subscriptions", payload)
     if not res["success"]:
         return res

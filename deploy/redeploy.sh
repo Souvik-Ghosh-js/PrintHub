@@ -31,6 +31,9 @@ sudo mysql < "$APP_DIR/server/schema.sql" || true
 echo "==> Apply column migrations (idempotent)..."
 sudo mysql < "$APP_DIR/deploy/migrate.sql"
 
+echo "==> Daily billing job timer (idempotent)..."
+APP_DIR="$APP_DIR" bash "$APP_DIR/deploy/install_timer.sh"
+
 echo "==> Restart..."
 sudo systemctl restart printhub.service
 sleep 2

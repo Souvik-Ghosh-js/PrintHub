@@ -27,11 +27,12 @@
     </div>
   </div>
 
-  {% if mandate_fee %}
+  {% if autopay_next %}
   <p class="muted tiny" style="margin:-.4rem 0 1rem;">
-    Next step after this: approve your ₹{{ mandate_fee }}/month autopay
-    mandate. That charges your first month and keeps the shop running
-    automatically — no reminders to chase.</p>
+    This covers installation and your first month. Next, turn on autopay
+    from your dashboard: ₹{{ plan_fee }} is then debited on the
+    {{ debit_day }}th of each month for the month ahead, so your shop never
+    goes offline.</p>
   {% endif %}
 
   <button id="pay-btn" class="btn btn-success btn-block btn-lg">Pay ₹{{ amount }} securely</button>

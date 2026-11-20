@@ -67,6 +67,36 @@ sudo systemctl restart printhub
 - **Vendor accounts** (print-job money): nothing to do server-side — each
   vendor enters their own keys on their dashboard, webhook
   `…/payment/webhook/vendor`. Every shop has a different Razorpay account.
+- **Autopay webhook**: add `…/payment/webhook/autopay` in the platform
+  Razorpay dashboard with the `subscription.*` events (authenticated,
+  activated, charged, pending, halted, cancelled). Its secret goes in
+  `AUTOPAY_RAZORPAY_WEBHOOK_SECRET` (falls back to the platform one).
+
+### Monthly billing calendar
+
+Monthly vendors pay ₹999 installation + ₹194 for the first month in one
+payment at signup. After that every month is **due on the 1st**:
+
+| When | What happens |
+|---|---|
+| 27th | Autopay debits ₹194 for next month. |
+| 27th → 1st, daily at 19:00 IST | If next month is still unpaid, the vendor gets a reminder email (none on the debit day itself while the debit is still in flight). |
+| End of the 1st | Still unpaid → shop disabled (status `suspended`). They get one "shop offline" email. |
+| Any time | Paying (autopay retry or **Pay now** on the dashboard) brings the shop straight back. |
+
+The reminders are sent by `server/jobs.py`, run by the `printhub-daily`
+systemd timer (installed by `setup.sh` / `redeploy.sh`). Email needs SMTP:
+
+```bash
+sudo nano /etc/printhub.env
+# SMTP_HOST=smtp.gmail.com   SMTP_PORT=587   SMTP_SECURITY=starttls
+# SMTP_USER=billing@yourdomain.com   SMTP_PASSWORD=<app password>
+# SMTP_FROM=billing@yourdomain.com
+cd /home/ubuntu/printhub/server && set -a && . /etc/printhub.env && set +a   && .venv/bin/python jobs.py daily --dry-run   # who would be emailed today
+```
+
+Without SMTP the job still disables unpaid shops; it logs each unsent
+email and retries it on the next run.
 
 ## 5. First-run walkthrough
 
@@ -127,6 +157,8 @@ and point shop-PC workers at `https://yourdomain.com`.
 |---|---|
 | Redeploy (git push, then on server) | `bash deploy/redeploy.sh` |
 | App logs (live) | `sudo journalctl -u printhub -f` |
+| Billing job: next run / logs | `systemctl list-timers printhub-daily.timer` / `sudo journalctl -u printhub-daily -n 50` |
+| Billing job: run now | `sudo systemctl start printhub-daily.service` |
 | Restart app | `sudo systemctl restart printhub` |
 | MySQL shell | `sudo mysql printhub` |
 | Change admin password | edit `/etc/printhub.env`, restart |

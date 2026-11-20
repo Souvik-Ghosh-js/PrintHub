@@ -71,6 +71,10 @@ CREATE TABLE IF NOT EXISTS vendors (
     autopay_next_charge     VARCHAR(64),
     autopay_plan_id         VARCHAR(128),
 
+    -- Last billing email sent (e.g. 'reminder:2026-11-28'), so the daily job
+    -- sends each reminder at most once.
+    last_billing_email      VARCHAR(64),
+
     created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     UNIQUE KEY uq_shop_code (shop_code),

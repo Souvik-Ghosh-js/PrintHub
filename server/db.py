@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS vendors (
     razorpay_webhook_secret TEXT,
     autopay_subscription_id TEXT, autopay_status TEXT,
     autopay_next_charge TEXT, autopay_plan_id TEXT,
+    last_billing_email TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS payments (
@@ -148,6 +149,7 @@ _SQLITE_MIGRATIONS = [
     "ALTER TABLE vendors ADD COLUMN razorpay_key_secret TEXT",
     "ALTER TABLE vendors ADD COLUMN razorpay_webhook_secret TEXT",
     "ALTER TABLE vendors ADD COLUMN autopay_plan_id TEXT",
+    "ALTER TABLE vendors ADD COLUMN last_billing_email TEXT",
 ]
 
 
@@ -288,6 +290,32 @@ def list_payments(vendor_id=None, limit=200):
         "SELECT p.*, v.shop_name FROM payments p "
         "LEFT JOIN vendors v ON v.id = p.vendor_id "
         "ORDER BY p.created_at DESC LIMIT %s", (limit,))
+
+
+def payment_exists(vendor_id, kind, reference):
+    """Has this gateway payment already been recorded? Guards against a
+    redelivered webhook applying the same debit twice."""
+    rows = query("SELECT id FROM payments WHERE vendor_id = %s AND kind = %s "
+                 "AND reference = %s LIMIT 1", (vendor_id, kind, reference))
+    return bool(rows)
+
+
+def claim_billing_email(vendor_id, key):
+    """Atomically mark billing email `key` as sent to this vendor. Returns
+    True only for the ONE caller that should send it, so two overlapping
+    runs of the daily job never email a vendor twice."""
+    rowcount, _ = execute(
+        "UPDATE vendors SET last_billing_email = %s WHERE id = %s AND "
+        "(last_billing_email IS NULL OR last_billing_email <> %s)",
+        (key, vendor_id, key))
+    return rowcount == 1
+
+
+def release_billing_email(vendor_id, key, previous):
+    """Undo claim_billing_email after a failed send, so a later run retries."""
+    execute("UPDATE vendors SET last_billing_email = %s "
+            "WHERE id = %s AND last_billing_email = %s",
+            (previous, vendor_id, key))
 
 
 def log_activity(actor, action, detail="", vendor_id=None):

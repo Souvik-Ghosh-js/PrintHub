@@ -45,6 +45,9 @@ CALL ph_add_column('vendors', 'razorpay_key_secret',     'VARCHAR(128)');
 CALL ph_add_column('vendors', 'razorpay_webhook_secret', 'VARCHAR(128)');
 CALL ph_add_column('vendors', 'autopay_plan_id',         'VARCHAR(128)');
 
+-- Billing reminder emails (dedupe key of the last one sent)
+CALL ph_add_column('vendors', 'last_billing_email',      'VARCHAR(64)');
+
 -- Online payment tracking on print jobs
 CALL ph_add_column('print_jobs', 'order_id',       'VARCHAR(128)');
 CALL ph_add_column('print_jobs', 'transaction_id', 'VARCHAR(128)');

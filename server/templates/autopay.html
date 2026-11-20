@@ -15,16 +15,21 @@
       <span class="muted">Charged automatically</span>
       <strong style="font-size:1.3rem;">₹{{ amount }} / {{ interval }}</strong>
     </div>
-    {% if first_charge %}
     <div class="row-between" style="margin-top:.5rem;">
-      <span class="muted">First automatic charge</span>
-      <span>{{ first_charge[:10] }}</span>
+      <span class="muted">First automatic debit</span>
+      <span>{{ first_charge.day }} {{ first_charge.strftime('%b %Y') }}</span>
     </div>
-    <p class="muted tiny" style="margin:.6rem 0 0;">Your current period is
-      already paid — autopay takes over when it ends, so you are never
-      charged twice.</p>
-    {% endif %}
+    <p class="muted tiny" style="margin:.6rem 0 0;">Nothing is charged today
+      (your bank may show a small check amount that is refunded). From then
+      on ₹{{ amount }} is debited on the {{ first_charge.day }}th of every
+      month, ahead of the 1st it is due.</p>
   </div>
+  {% if pay_now %}
+  <div class="note note-warn" style="margin-bottom:1rem;">
+    Autopay starts with next month. Your current month is still unpaid —
+    pay it from your dashboard after approving, or your shop goes offline
+    after the 1st.</div>
+  {% endif %}
 
   <button id="approve" class="btn btn-success btn-block btn-lg">
     Approve the mandate</button>
@@ -39,8 +44,8 @@
 {% block scripts %}
 <script>
   // Authorising a subscription uses subscription_id where a one-time
-  // payment would use order_id. Razorpay charges the first month at
-  // authorisation and keeps it, then debits every cycle on its own.
+  // payment would use order_id. The subscription has a future start_at, so
+  // approval only validates the mandate; the first real debit is on the 27th.
   const rzp = new Razorpay({
     key: "{{ key_id }}",
     subscription_id: "{{ subscription_id }}",

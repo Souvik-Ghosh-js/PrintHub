@@ -997,19 +997,23 @@ def vendor_dashboard(vendor):
                        if j.get("payment_status") == "paid"),
     }
     base = db.PUBLIC_BASE_URL.rstrip("/")
+    autopay_status = (vendor.get("autopay_status") or "").lower()
     return render_template(
         "vendor_dashboard.html", vendor=vendor, jobs=jobs, payments=payments,
         plans=config.PLANS, worker_exe=worker_exe_available(),
         has_gateway=has_gateway, has_prices=has_prices, stats=stats,
         live=billing.has_access(vendor) and has_gateway and has_prices,
         days_left=billing.days_until_renewal(vendor),
-        autopay_on=(vendor.get("autopay_status") or "").lower()
-                   in ("active", "authenticated"),
+        autopay_on=autopay_status in billing.AUTOPAY_HEALTHY,
         autopay_supported=vendor["plan"] in AUTOPAY_INTERVAL,
-        awaiting_mandate=billing.awaiting_mandate(vendor),
-        mandate_fee=billing.renewal_amount(vendor["plan"])
-                    if vendor["plan"] in AUTOPAY_INTERVAL else 0,
-        autopay_pending=(vendor.get("autopay_status") or "").lower() == "created",
+        owes_first_month=billing.owes_first_month(vendor),
+        autopay_pending=autopay_status == "created",
+        # A debit failed: 'pending' while Razorpay retries, 'halted' after.
+        autopay_failed=autopay_status in ("pending", "halted"),
+        # Mandates approved before the 27th calendar keep their old price
+        # and day until the vendor re-approves.
+        autopay_outdated=_autopay_outdated(vendor),
+        debit_day=config.AUTOPAY_DEBIT_DAY,
         renewal_amount=(billing.renewal_amount(vendor["plan"])
                         if vendor["plan"] != "lifetime" else 0),
         shop_url=f"{base}/{vendor['shop_code']}",
@@ -1090,11 +1094,10 @@ def _start_subscription_checkout(vendor, purpose):
         amount = amounts["total"]
         plan_fee = amounts["subscription_fee"]
         install_fee = amounts["installation_fee"]
-        mandate_fee = amounts["mandate_fee"]
         prefix = "SUB"
     else:
         amount = billing.renewal_amount(vendor["plan"])
-        plan_fee, install_fee, mandate_fee = amount, 0, 0
+        plan_fee, install_fee = amount, 0
         prefix = "REN"
 
     result = rzp.create_order(
@@ -1113,7 +1116,9 @@ def _start_subscription_checkout(vendor, purpose):
     return render_template("pay.html", shop_name=vendor["shop_name"],
                            plan=vendor["plan"], amount=amount,
                            plan_fee=plan_fee, install_fee=install_fee,
-                           mandate_fee=mandate_fee,
+                           autopay_next=(purpose == "first_payment"
+                                         and billing.uses_autopay(vendor["plan"])),
+                           debit_day=config.AUTOPAY_DEBIT_DAY,
                            order_id=order_id, purpose=purpose,
                            amount_paise=result["amount_paise"],
                            key_id=result["key_id"],
@@ -1123,18 +1128,35 @@ def _start_subscription_checkout(vendor, purpose):
 
 # ===========================================================================
 # Autopay — the vendor authorises a mandate once and Razorpay debits each
-# cycle by itself (plan_type PERIODIC). We never schedule or raise a charge.
+# cycle by itself (plan_type PERIODIC). We only choose the FIRST debit date
+# (the 27th that pays their next unpaid month); Razorpay repeats it monthly.
 # ===========================================================================
 # Monthly only. Yearly is a one-time charge the vendor renews themselves.
 def _charge_at_text(ts):
     """Razorpay reports the next debit as a unix timestamp; store it in the
-    same YYYY-MM-DD... shape the dashboard already slices for display."""
+    same YYYY-MM-DD... shape the dashboard already slices for display, on
+    the billing calendar (IST) so its date matches the reminder logic."""
     if not ts:
         return None
     try:
-        return datetime.fromtimestamp(int(ts)).isoformat(" ", "seconds")
+        return billing.from_unix(ts).isoformat(" ", "seconds")
     except (TypeError, ValueError, OSError):
         return None
+
+
+def _autopay_outdated(vendor):
+    """A live mandate that does not debit on the 27th predates the billing
+    calendar: it still charges the old price on the old day. The vendor has
+    to re-approve once (the dashboard offers 'Update autopay')."""
+    if (vendor.get("autopay_status") or "").lower() not in billing.AUTOPAY_HEALTHY:
+        return False
+    nxt = vendor.get("autopay_next_charge")
+    if not nxt:
+        return False
+    try:
+        return datetime.fromisoformat(str(nxt)).day != config.AUTOPAY_DEBIT_DAY
+    except ValueError:
+        return False
 
 
 AUTOPAY_INTERVAL = {"monthly": ("monthly", 1)}
@@ -1167,8 +1189,15 @@ def vendor_autopay_start(vendor):
     period, interval = AUTOPAY_INTERVAL[vendor["plan"]]
 
     # A plan is the recurring price; reuse this vendor's if they have one, so
-    # re-enabling autopay does not litter the account with duplicate plans.
+    # re-enabling autopay does not litter the account with duplicate plans —
+    # but only while its price is still current. A plan created at an old
+    # fee would keep debiting the old fee forever.
     plan_id = vendor.get("autopay_plan_id")
+    if plan_id:
+        existing = rzp.fetch_plan(config.PLATFORM_RAZORPAY_KEY_ID,
+                                  config.PLATFORM_RAZORPAY_KEY_SECRET, plan_id)
+        if not existing or rzp.plan_amount(existing) != float(amount):
+            plan_id = None
     if not plan_id:
         pres = rzp.create_plan(
             config.PLATFORM_RAZORPAY_KEY_ID,
@@ -1181,6 +1210,21 @@ def vendor_autopay_start(vendor):
         plan_id = pres["plan_id"]
         db.update_vendor(vendor["id"], {"autopay_plan_id": plan_id})
 
+    # The first debit is the 27th that pays this vendor's next unpaid month;
+    # Razorpay then repeats it on the 27th of every month.
+    first_charge = billing.next_autopay_start(vendor)
+
+    # One mandate per vendor: replacing one (an outdated price/day, or a
+    # halted mandate) cancels the old one first so it can never debit too.
+    old_sub = vendor.get("autopay_subscription_id")
+    if old_sub and (vendor.get("autopay_status") or "").lower() not in (
+            "cancelled", "completed", "expired"):
+        rzp.cancel_subscription(config.PLATFORM_RAZORPAY_KEY_ID,
+                                config.PLATFORM_RAZORPAY_KEY_SECRET, old_sub)
+        db.log_activity("vendor", "autopay_replaced",
+                        f"mandate {old_sub} cancelled for a new one",
+                        vendor_id=vendor["id"])
+
     # total_count is how many cycles the mandate may run before the vendor
     # re-authorises. 120 months is a decade — effectively open-ended.
     res = rzp.create_subscription(
@@ -1188,6 +1232,7 @@ def vendor_autopay_start(vendor):
         config.PLATFORM_RAZORPAY_KEY_SECRET,
         plan_id=plan_id,
         total_count=AUTOPAY_TOTAL_COUNT,
+        start_at=billing.to_unix(first_charge),
         notes={"vendor_id": vendor["id"], "shop": vendor["shop_name"]},
     )
     if not res["success"] or not res.get("subscription_id"):
@@ -1197,12 +1242,23 @@ def vendor_autopay_start(vendor):
     db.update_vendor(vendor["id"], {
         "autopay_subscription_id": res["subscription_id"],
         "autopay_status": (res.get("status") or "created").lower(),
+        "autopay_next_charge": first_charge.isoformat(" ", "seconds"),
     })
     db.log_activity("vendor", "autopay_started",
                     f"mandate {res['subscription_id']} for ₹{amount} "
-                    f"per {period}", vendor_id=vendor["id"])
+                    f"per {period}, first debit {first_charge:%Y-%m-%d}",
+                    vendor_id=vendor["id"])
+    # The first debit pays the month starting the 1st after it. If the
+    # vendor is not paid up to that 1st (they are overdue, or this month's
+    # debit day already passed), the gap must be paid by hand.
+    renews_at = vendor.get("renews_at")
+    if isinstance(renews_at, str):
+        renews_at = datetime.fromisoformat(renews_at)
+    pay_now = (not renews_at
+               or renews_at < billing.next_month_start(first_charge))
     return render_template("autopay.html", vendor=vendor, amount=amount,
-                           interval=period,
+                           interval=period, first_charge=first_charge,
+                           pay_now=pay_now,
                            subscription_id=res["subscription_id"],
                            key_id=res["key_id"])
 
@@ -1286,11 +1342,15 @@ def autopay_webhook():
         # The whole point: every automatic debit renews the subscription.
         # This covers the first charge at authorisation too, since Razorpay
         # keeps that one rather than refunding it.
-        billing.record_renewal_payment(vendor, method="autopay",
-                                       reference=str(ev.get("payment_id") or sub_id))
-        db.log_activity("system", "autopay_charged",
-                        f"₹{ev.get('payment_amount')} debited automatically "
-                        f"(mandate {sub_id})", vendor_id=vendor["id"])
+        # Keyed on the payment id so a redelivered webhook is a no-op.
+        recorded = billing.record_renewal_payment(
+            vendor, method="autopay",
+            reference=ev.get("payment_id") or None,
+            amount=ev.get("payment_amount"))
+        if recorded is not None:
+            db.log_activity("system", "autopay_charged",
+                            f"₹{ev.get('payment_amount')} debited automatically "
+                            f"(mandate {sub_id})", vendor_id=vendor["id"])
     elif event == rzp.EVENT_SUB_AUTHENTICATED:
         db.log_activity("system", "autopay_authorised", f"mandate {sub_id}",
                         vendor_id=vendor["id"])
@@ -1409,10 +1469,11 @@ def pay_return():
     vendor = db.get_vendor(order["vendor_id"])
     if order["purpose"] == "first_payment":
         if billing.uses_autopay(vendor["plan"]):
-            message = (f"Installation paid for {vendor['shop_name']} "
-                       f"(₹{order['amount']}). One step left: sign in and "
-                       f"approve your ₹{billing.renewal_amount(vendor['plan'])}"
-                       f"/month autopay to start the plan.")
+            message = (f"Subscription for {vendor['shop_name']} is active. "
+                       f"Amount paid: ₹{order['amount']}. Sign in and turn on "
+                       f"autopay so ₹{billing.renewal_amount(vendor['plan'])} "
+                       f"is paid automatically on the "
+                       f"{config.AUTOPAY_DEBIT_DAY}th of each month.")
         else:
             message = (f"Subscription for {vendor['shop_name']} is active. "
                        f"Amount paid: ₹{order['amount']}.")

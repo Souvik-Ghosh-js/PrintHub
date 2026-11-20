@@ -75,6 +75,15 @@ PRINTHUB_ADMIN_PASSWORD=${ADMIN_PASSWORD}
 PLATFORM_RAZORPAY_KEY_ID=
 PLATFORM_RAZORPAY_KEY_SECRET=
 PLATFORM_RAZORPAY_WEBHOOK_SECRET=
+# Billing reminder emails (SMTP). Blank = use the defaults in config.py.
+# SMTP_SECURITY: starttls (587) | ssl (465) | none
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_SECURITY=starttls
+SMTP_USER=
+SMTP_PASSWORD=
+SMTP_FROM=
+SMTP_FROM_NAME=Mohini Print Shop
 ENV
   sudo chmod 600 "$ENV_FILE"
   echo "    generated new secrets (admin password shown at the end)"
@@ -124,6 +133,9 @@ sudo systemctl daemon-reload
 sudo systemctl enable printhub.service
 sudo systemctl restart printhub.service
 
+echo "    daily billing job (reminder emails + status sweep)..."
+APP_DIR="$APP_DIR" bash "$APP_DIR/deploy/install_timer.sh"
+
 echo "==> [8/8] nginx (port 80 -> app; works on the bare IP, domain later)..."
 sudo tee /etc/nginx/sites-available/printhub >/dev/null <<NGINX
 server {
@@ -165,7 +177,7 @@ cat <<NOTE
  1. Lightsail firewall: open port 80 (and 443 for later).
  2. Log in to /admin/login -> register a vendor -> activate ->
     hand over credentials + QR poster.
- 3. Platform Razorpay keys: sudo nano ${ENV_FILE}
+ 3. Platform Razorpay keys + SMTP (reminder emails): sudo nano ${ENV_FILE}
     then: sudo systemctl restart printhub
  4. When the domain is connected:  bash ${APP_DIR}/deploy/setup_https.sh
     (sets HTTPS + rewrites PRINTHUB_BASE_URL so QR codes use the domain)
