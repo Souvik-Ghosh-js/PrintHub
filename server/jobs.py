@@ -7,13 +7,16 @@ Each run:
   1. sweep_subscriptions() — moves unpaid shops to grace/suspended on time
      even if nobody opens a page;
   2. emails every monthly vendor whose coming month is unpaid (27th..1st),
-     and a one-off notice to any vendor just disabled for not paying.
+     and a one-off notice to any vendor just disabled for not paying;
+  3. deletes order files older than config.FILE_RETENTION_DAYS (order
+     records stay, only the PDFs on disk go).
 Safe to run more than once a day: each email is claimed atomically per
 vendor per day (db.claim_billing_email), so nobody is mailed twice.
 """
 import sys
 
 import billing
+import config
 import db
 import notify
 
@@ -49,6 +52,14 @@ def run_daily(dry_run=False, at=None):
             failed += 1
             db.release_billing_email(v["id"], key, previous)
     print(f"[daily] emails sent: {sent}, failed: {failed}")
+
+    try:
+        files, size = db.purge_old_files(config.FILE_RETENTION_DAYS, dry_run)
+        print(f"[daily] {'would delete' if dry_run else 'deleted'} {files} "
+              f"order file(s) older than {config.FILE_RETENTION_DAYS} days "
+              f"({size / 1e6:.1f} MB); order records kept")
+    except Exception as e:   # never let cleanup fail the billing run
+        print(f"[daily] file cleanup failed: {e}")
     return sent, failed
 
 

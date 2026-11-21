@@ -71,6 +71,12 @@ REMINDER_FROM_DAY = 27
 # The calendar is Indian, whatever timezone the server clock runs in.
 BILLING_TZ_OFFSET_MINUTES = 330  # IST, UTC+05:30 (no DST)
 
+# --- Stored order files ---
+# The daily job deletes order PDFs older than this many days (mostly
+# abandoned checkouts; printed files are deleted as soon as they print).
+# Order records are always kept — only the file on disk goes.
+FILE_RETENTION_DAYS = 30
+
 # --- Outgoing email (billing reminders) over SMTP ---
 # Defaults are the Mohini Print Shop Gmail account (app password), so
 # reminders work after a redeploy with no server-side setup. A non-empty

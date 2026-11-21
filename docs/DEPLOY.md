@@ -95,6 +95,12 @@ sudo nano /etc/printhub.env
 cd /home/ubuntu/printhub/server && set -a && . /etc/printhub.env && set +a   && .venv/bin/python jobs.py daily --dry-run   # who would be emailed today
 ```
 
+The same daily run deletes order PDFs older than 30 days
+(`FILE_RETENTION_DAYS` in `config.py`) from `/var/lib/printhub/uploads`.
+Order records are never deleted — only the file on disk. Printed files are
+already removed the moment the shop prints them, so this mainly clears
+uploads from checkouts that were never paid.
+
 Without SMTP the job still disables unpaid shops; it logs each unsent
 email and retries it on the next run.
 

@@ -519,6 +519,52 @@ def storage_remove(filename):
         return False
 
 
+def purge_old_files(days, dry_run=False):
+    """Delete order files older than `days` to keep the disk from filling.
+
+    Only the PDF on disk goes: every print_jobs row (who ordered, what,
+    price, payment, printed or not) is kept, with storage_key cleared so
+    the row no longer points at a missing file. Files on disk older than
+    the cutoff that no order refers to are removed too.
+    Returns (files_removed, bytes_freed) — would-be values on a dry run.
+    """
+    cutoff = datetime.now() - timedelta(days=days)
+    cut = cutoff.strftime("%Y-%m-%d %H:%M:%S")
+    removed = freed = 0
+
+    def drop(path):
+        nonlocal removed, freed
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            return            # already gone (e.g. deleted when printed)
+        if dry_run or storage_remove(os.path.basename(path)):
+            removed += 1
+            freed += size
+
+    where = ("storage_key IS NOT NULL AND storage_key <> '' "
+             "AND created_at < %s")
+    for row in query(f"SELECT storage_key FROM print_jobs WHERE {where}", (cut,)):
+        drop(storage_path(row["storage_key"]))
+    if not dry_run:
+        execute(f"UPDATE print_jobs SET storage_key = NULL WHERE {where}", (cut,))
+
+    # Leftovers no order refers to (e.g. an upload whose order never saved).
+    try:
+        names = os.listdir(UPLOAD_DIR)
+    except FileNotFoundError:
+        names = []
+    for name in names:
+        path = storage_path(name)
+        try:
+            old = os.path.isfile(path) and os.path.getmtime(path) < cutoff.timestamp()
+        except OSError:
+            continue
+        if old:
+            drop(path)
+    return removed, freed
+
+
 def public_url(storage_key, worker_token):
     """URL the vendor's worker uses to download a job file (token-guarded)."""
     return f"{PUBLIC_BASE_URL}/files/{storage_key}?token={worker_token}"
