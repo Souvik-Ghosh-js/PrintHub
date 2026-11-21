@@ -531,9 +531,13 @@ def purge_old_files(days, dry_run=False):
     cutoff = datetime.now() - timedelta(days=days)
     cut = cutoff.strftime("%Y-%m-%d %H:%M:%S")
     removed = freed = 0
+    seen = set()   # a dry run leaves files in place: don't count one twice
 
     def drop(path):
         nonlocal removed, freed
+        if path in seen:
+            return
+        seen.add(path)
         try:
             size = os.path.getsize(path)
         except OSError:
