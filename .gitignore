@@ -16,3 +16,6 @@ server/printhub.sqlite
 .env
 *.env
 !.env.example
+
+# SSH keys (never commit - this repo is public)
+*.pem
