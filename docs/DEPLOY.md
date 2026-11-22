@@ -74,12 +74,12 @@ sudo systemctl restart printhub
 
 ### Monthly billing calendar
 
-Monthly vendors pay ₹999 installation + ₹194 for the first month in one
+Monthly vendors pay ₹999 installation + ₹294 for the first month in one
 payment at signup. After that every month is **due on the 1st**:
 
 | When | What happens |
 |---|---|
-| 27th | Autopay debits ₹194 for next month. |
+| 27th | Autopay debits ₹294 for next month. |
 | 27th → 1st, daily at 19:00 IST | If next month is still unpaid, the vendor gets a reminder email (none on the debit day itself while the debit is still in flight). |
 | End of the 1st | Still unpaid → shop disabled (status `suspended`). They get one "shop offline" email. |
 | Any time | Paying (autopay retry or **Pay now** on the dashboard) brings the shop straight back. |

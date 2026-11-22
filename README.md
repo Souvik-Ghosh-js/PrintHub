@@ -20,7 +20,7 @@ PrintHub/
 | §2 Per-page delete + auto-centre single page | `customer.html` slots UI; single side prints centred (`compose_id_pdf`) |
 | §3 Page Cutting & AI Processing | `server/docscan.py` + `server/docenh/` + `weights/docunet_mobile.onnx`. Auto Precise Cut = ML corner detection with classical-CV fallback (`/api/detect_document`, source logged in browser + server console). Light/Burn filter = `/api/enhance_page` (shadow removal, white balance, contrast, gray/B&W). Manual adjustment = Cropper.js corner handles |
 | §4 Vendor onboarding, auto-generated credentials | `billing.generate_credentials`; delivered once in the admin panel after first payment |
-| §5 Subscription & pricing (₹194/mo, ₹1999/yr, ₹20000 lifetime + ₹999 install) | `config.PLANS`, `billing.first_payment` |
+| §5 Subscription & pricing (₹294/mo, ₹1999/yr, ₹20000 lifetime + ₹999 install) | `config.PLANS`, `billing.first_payment` |
 | Monthly calendar: due on the 1st, autopay on the 27th, reminder emails 27th→1st, disabled after the 1st | `billing.py` (`monthly_paid_until`, `refresh_status`, `billing_email_due`), `jobs.py` + `notify.py`, `deploy/install_timer.sh` |
 | §6 Billing logic (first combined payment, autopay renewals, credential generation, vendor pricing control) | `billing.py`; vendor B/W + colour prices in the vendor dashboard |
 | §7 Printer configuration (single/multi max 2, B/W+colour routing, trays, Change Printer) | `worker/printhub_worker.py` (config UI + routing) synced to the server via `/worker/api/printer-config`; visible on the vendor dashboard |
