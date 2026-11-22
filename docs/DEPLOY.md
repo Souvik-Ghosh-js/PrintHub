@@ -95,6 +95,12 @@ sudo nano /etc/printhub.env
 cd /home/ubuntu/printhub/server && set -a && . /etc/printhub.env && set +a   && .venv/bin/python jobs.py daily --dry-run   # who would be emailed today
 ```
 
+Customers' Word/Excel/PowerPoint uploads are converted to PDF by headless
+LibreOffice. `deploy/install_converter.sh` installs it (with fonts for
+Calibri/Arial-style layouts and Indian scripts); `setup.sh` and
+`redeploy.sh` both run it, and it does nothing once installed. Check it with
+`soffice --version`.
+
 The same daily run deletes order PDFs older than 30 days
 (`FILE_RETENTION_DAYS` in `config.py`) from `/var/lib/printhub/uploads`.
 Order records are never deleted — only the file on disk. Printed files are

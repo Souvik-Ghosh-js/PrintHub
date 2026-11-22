@@ -319,7 +319,7 @@
         <tr>
           <td>{{ j.id }}</td>
           <td>{{ j.original_filename }}</td>
-          <td>{{ 'Colour' if j.color_mode == 'color' else 'B/W' }}</td>
+          <td>{{ 'Colour' if j.color_mode == 'color' else 'B/W' }}{% if j.sides == 'double' %} · 2-sided{% endif %}</td>
           <td>{{ j.copies }}</td>
           <td>₹{{ '%.2f'|format(j.price) }}</td>
           <td><span class="pill {{ 'pill-ok' if j.status == 'printed'

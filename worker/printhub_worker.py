@@ -172,17 +172,33 @@ def copies_for(job):
         return 1
 
 
+def printer_can_duplex(printer):
+    """True if the driver reports a duplex unit (None if it won't say)."""
+    try:
+        return bool(win32print.DeviceCapabilities(printer, "", win32con.DC_DUPLEX))
+    except Exception:
+        return None
+
+
 def configure_printer_settings(printer, job, tray_name):
     h = win32print.OpenPrinter(printer, {"DesiredAccess": win32print.PRINTER_ALL_ACCESS})
     props = win32print.GetPrinter(h, 2)
     devmode = props["pDevMode"]
 
+    # Every member set below also gets its dmFields bit (see Copies): a
+    # driver may ignore a value whose bit is off, which would silently print
+    # a "both sides" order on one side.
     devmode.Color = 2 if job.get("color_mode") == "color" else 1
+    devmode.Fields |= win32con.DM_COLOR
+    # 2 = DMDUP_VERTICAL: long-edge flip, pages read like a book.
     devmode.Duplex = 2 if job.get("sides") == "double" else 1
+    devmode.Fields |= win32con.DM_DUPLEX
     devmode.Orientation = 2 if job.get("orientation") == "landscape" else 1
+    devmode.Fields |= win32con.DM_ORIENTATION
     paper_map = {"A4": 9, "A3": 8, "Letter": 1}
     if job.get("paper_size") in paper_map:
         devmode.PaperSize = paper_map[job["paper_size"]]
+        devmode.Fields |= win32con.DM_PAPERSIZE
 
     # The customer paid per copy, so print that many. A driver ignores any
     # DEVMODE member whose dmFields bit is not set, so the bits must be
@@ -197,6 +213,7 @@ def configure_printer_settings(printer, job, tray_name):
     bin_id = tray_bin_id(printer, tray_name)
     if bin_id is not None:
         devmode.DefaultSource = bin_id
+        devmode.Fields |= win32con.DM_DEFAULTSOURCE
 
     props["pDevMode"] = devmode
     win32print.SetPrinter(h, 2, props, 0)
@@ -492,8 +509,14 @@ class WorkerThread(threading.Thread):
             self.record(job, f"waiting: printer {reason}")
             return
 
+        double = job.get("sides") == "double"
         self.log(f"📥 Job {job_id}: {filename} "
-                 f"({job.get('color_mode')}) → {printer}")
+                 f"({job.get('color_mode')}{', both sides' if double else ''})"
+                 f" → {printer}")
+        if double and printer_can_duplex(printer) is False:
+            self.log(f"⚠️ Job {job_id}: the customer asked for both sides, but "
+                     f"{printer} has no duplex unit — it will print on one "
+                     f"side. Turn the pages over by hand if needed.")
         self.record(job, "printing")
         self.submitted.add(job_id)
 
@@ -876,7 +899,9 @@ class App(tk.Tk):
         ts = time.strftime("%H:%M:%S")
         self.tree.insert("", 0, values=(
             job.get("id"), job.get("original_filename", ""),
-            job.get("color_mode", ""), job.get("copies", 1), status, ts,
+            job.get("color_mode", "") +
+            (" · 2-sided" if job.get("sides") == "double" else ""),
+            job.get("copies", 1), status, ts,
         ))
 
     def _on_close(self):

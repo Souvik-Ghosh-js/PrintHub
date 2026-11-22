@@ -9,6 +9,10 @@
 #  Skip the pull (e.g. after an scp of local-only files):
 #     NO_PULL=1 bash /home/ubuntu/printhub/deploy/redeploy.sh
 # ============================================================
+# The whole script is one { ... } block so bash reads it completely before
+# running anything: the pull below rewrites this very file, and bash would
+# otherwise carry on reading the NEW file from the OLD byte offset.
+{
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/home/ubuntu/printhub}"
@@ -19,11 +23,17 @@ if [ -z "${NO_PULL:-}" ] && [ -d "$APP_DIR/.git" ]; then
   git -C "$APP_DIR" fetch --quiet origin "$BRANCH"
   git -C "$APP_DIR" reset --hard "origin/$BRANCH"
   git -C "$APP_DIR" log --oneline -1
+  # Run the steps of the version just pulled (it may have new ones).
+  exec env NO_PULL=1 APP_DIR="$APP_DIR" BRANCH="$BRANCH" \
+    bash "$APP_DIR/deploy/redeploy.sh"
 fi
 
 echo "==> Dependencies (only installs what changed)..."
 cd "$APP_DIR/server"
 .venv/bin/pip install -r requirements.txt --quiet
+
+echo "==> Document converter (LibreOffice, idempotent)..."
+bash "$APP_DIR/deploy/install_converter.sh"
 
 echo "==> Apply any new schema objects (CREATE TABLE IF NOT EXISTS is safe)..."
 sudo mysql < "$APP_DIR/server/schema.sql" || true
@@ -39,3 +49,5 @@ sudo systemctl restart printhub.service
 sleep 2
 curl -s http://127.0.0.1:8000/health && echo
 sudo systemctl status printhub.service --no-pager | head -5
+exit 0
+}

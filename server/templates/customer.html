@@ -129,6 +129,22 @@
           border-radius: 999px; padding: .12rem .55rem; font-size: .72rem;
           font-weight: 600; color: var(--ink-2); cursor: pointer; }
   .chip:hover { border-color: var(--brand-500); color: var(--brand-700); }
+  /* ---------- both-sides switch ---------- */
+  .sides-toggle { display: flex; align-items: center; gap: .75rem; margin-top: .95rem;
+    padding: .75rem .85rem; border: 1px solid var(--line); border-radius: var(--r-sm);
+    cursor: pointer; user-select: none; }
+  .sides-toggle[hidden] { display: none; }
+  .sides-toggle input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .sides-track { flex: none; position: relative; width: 44px; height: 26px;
+    border-radius: 13px; background: var(--line); transition: background .15s; }
+  .sides-track::after { content: ""; position: absolute; top: 3px; left: 3px;
+    width: 20px; height: 20px; border-radius: 50%; background: #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .15s; }
+  .sides-toggle input:checked + .sides-track { background: var(--brand-600); }
+  .sides-toggle input:checked + .sides-track::after { transform: translateX(18px); }
+  .sides-toggle input:focus-visible + .sides-track { outline: 2px solid var(--brand-600);
+    outline-offset: 2px; }
+  .sides-text { display: flex; flex-direction: column; gap: .1rem; }
   .pdf-err { color: var(--bad); font-size: .76rem; margin-top: .3rem; }
   .pdf-ok { color: var(--muted); font-size: .76rem; margin-top: .3rem; }
 
@@ -241,18 +257,19 @@
       <button type="button" class="btn btn-primary" id="pick-photos-btn">
         📷 Add photos</button>
       <button type="button" class="btn btn-ghost" id="pick-pdf-btn">
-        📄 Upload a PDF</button>
+        📄 Upload files</button>
     </div>
-    <p class="muted tiny" style="margin:0;">Up to <strong>10 photos</strong>
-      (one page each), or <strong>PDFs</strong> printed exactly as they are —
-      you can choose which pages of each to print.</p>
+    <p class="muted tiny" style="margin:0;"><strong>Photos</strong> from your
+      camera (up to 10, one page each, with crop &amp; fix), or
+      <strong>files</strong> — PDF, Word, Excel, PowerPoint, text or images —
+      printed as they are. You can choose which pages of each to print.</p>
   </div>
 
-  <!-- uploaded PDFs -->
+  <!-- uploaded files (any type, converted to PDF on the server) -->
   <div id="pdf-chosen" hidden>
     <div id="pdf-list"></div>
     <button type="button" class="btn btn-ghost btn-sm" id="add-pdf-btn"
-            style="margin-top:.6rem;">＋ Add another PDF</button>
+            style="margin-top:.6rem;">＋ Add another file</button>
   </div>
 
   <!-- photo pages -->
@@ -294,6 +311,15 @@
       <input type="tel" id="customer-phone" inputmode="numeric" placeholder="10-digit number">
     </div>
   </div>
+  <!-- documents only: an ID card is a single sheet by design -->
+  <label class="sides-toggle" id="sides-row" for="both-sides" hidden>
+    <input type="checkbox" id="both-sides">
+    <span class="sides-track" aria-hidden="true"></span>
+    <span class="sides-text">
+      <strong>Print on both sides of the paper</strong>
+      <span class="muted tiny" id="sides-note">Same price per page, half the paper.</span>
+    </span>
+  </label>
 </div>
 
 <div class="summary">
@@ -405,7 +431,8 @@
 
 <input type="file" id="file-input" accept="image/*" hidden>
 <input type="file" id="photos-input" accept="image/*" multiple hidden>
-<input type="file" id="pdf-input" accept="application/pdf" multiple hidden>
+<input type="file" id="pdf-input" multiple hidden
+       accept="application/pdf,.pdf,.doc,.docx,.docm,.dot,.dotx,.odt,.rtf,.txt,.xls,.xlsx,.xlsm,.ods,.csv,.ppt,.pptx,.pps,.ppsx,.odp,image/*,.heic,.heif,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain">
 {% endblock %}
 
 {% block scripts %}
@@ -427,6 +454,7 @@ fmtBtns.forEach(btn => btn.addEventListener("click", () => {
   const isDoc = state.format === "document";
   $("id-panel").hidden = isDoc;
   $("doc-panel").hidden = !isDoc;
+  $("sides-row").hidden = !isDoc;
   if (isDoc) renderDocPanel();
   $("id-slots").classList.toggle("stacked", state.layout === "stacked");
   $("layout-note").textContent = isDoc ? ""
@@ -563,7 +591,20 @@ async function addPhotos(files) {
   updatePrice();
 }
 
-const MAX_PDFS = 5;
+const MAX_PDFS = 10;            // files of any type (server: MAX_FILES)
+
+// What kind of upload this is, for the icon and the per-file preview.
+function fileKind(f) {
+  const ext = (f.name.split(".").pop() || "").toLowerCase();
+  if (ext === "pdf" || f.type === "application/pdf") return "pdf";
+  if ((f.type || "").startsWith("image/") ||
+      ["jpg","jpeg","png","webp","gif","bmp","tif","tiff","heic","heif"].includes(ext)) return "image";
+  if (["xls","xlsx","xlsm","ods","csv"].includes(ext)) return "sheet";
+  if (["ppt","pptx","pps","ppsx","odp"].includes(ext)) return "slides";
+  return "doc";
+}
+const KIND_ICON = { pdf: "📄", image: "🖼️", sheet: "📊",
+                    slides: "📽️", doc: "📝" };
 
 $("pick-pdf-btn").addEventListener("click", () => $("pdf-input").click());
 $("add-pdf-btn").addEventListener("click", () => $("pdf-input").click());
@@ -573,13 +614,14 @@ $("pdf-input").addEventListener("change", async () => {
   $("pdf-input").value = "";
   if (!files.length) return;
   const room = MAX_PDFS - state.pdfs.length;
-  if (room <= 0) { alert("You can attach at most " + MAX_PDFS + " PDFs."); return; }
+  if (room <= 0) { alert("You can attach at most " + MAX_PDFS + " files."); return; }
   for (const f of files.slice(0, room)) {
     if (f.size > 40 * 1024 * 1024) {
       alert("'" + f.name + "' is larger than 40 MB."); continue;
     }
     state.pages = [];                       // PDFs and photos are exclusive
     const entry = { file: f, name: f.name, size: f.size, pages: null,
+                    kind: fileKind(f),
                     range: "all", selected: null, error: null,
                     url: URL.createObjectURL(f) };
     state.pdfs.push(entry);
@@ -587,7 +629,7 @@ $("pdf-input").addEventListener("change", async () => {
     await refreshPdf(entry);
   }
   if (files.length > room) {
-    alert("Only " + room + " more PDF(s) could be added (limit " + MAX_PDFS + ").");
+    alert("Only " + room + " more file(s) could be added (limit " + MAX_PDFS + ").");
   }
   updatePrice();
 });
@@ -602,11 +644,11 @@ async function refreshPdf(entry) {
     const r = await fetch("/shop/" + SHOP + "/pdf-info", { method: "POST", body: fd });
     const d = await r.json();
     if (d.pages) entry.pages = d.pages;
-    if (!r.ok) { entry.error = d.error || "could not read this PDF";
+    if (!r.ok) { entry.error = d.error || "could not read this file";
                  entry.selected = 0; }
     else { entry.selected = d.selected; }
   } catch (e) {
-    entry.error = "could not read this PDF";
+    entry.error = "could not read this file";
     entry.selected = 0;
   }
   renderPdfList();
@@ -621,7 +663,7 @@ function renderPdfList() {
     card.className = "pdf-card";
     const total = e.pages == null ? "…" : e.pages;
     card.innerHTML =
-      '<span class="pdf-ico">\ud83d\udcc4</span>' +
+      '<span class="pdf-ico">' + (KIND_ICON[e.kind] || KIND_ICON.doc) + '</span>' +
       '<div class="pdf-body">' +
         '<div class="pdf-name"></div>' +
         '<div class="muted tiny meta"></div>' +
@@ -648,8 +690,11 @@ function renderPdfList() {
       '<button type="button" class="btn btn-ghost btn-sm del-btn">\u2715</button>';
 
     card.querySelector(".pdf-name").textContent = e.name;
+    // Office files are converted on the server first, which takes a moment.
     card.querySelector(".meta").textContent =
-      (e.pages == null ? "reading…"
+      (e.pages == null ? (e.error ? "not readable"
+                          : (e.kind === "pdf" || e.kind === "image" ? "reading…"
+                             : "converting…"))
         : e.pages + " page" + (e.pages > 1 ? "s" : "")) +
       " \u00b7 " + (e.size / 1048576).toFixed(1) + " MB";
 
@@ -686,8 +731,14 @@ function renderPdfList() {
         refreshPdf(e);
       }));
 
-    card.querySelector(".prev-btn").addEventListener("click",
-      () => window.open(e.url, "_blank"));
+    // A browser can show a PDF or an image as is; for Word/Excel/PowerPoint
+    // the main Preview button shows the converted pages instead.
+    const prev = card.querySelector(".prev-btn");
+    if (e.kind === "pdf" || e.kind === "image") {
+      prev.addEventListener("click", () => window.open(e.url, "_blank"));
+    } else {
+      prev.remove();
+    }
     card.querySelector(".del-btn").addEventListener("click", () => {
       URL.revokeObjectURL(e.url);
       state.pdfs.splice(i, 1);
@@ -1038,6 +1089,10 @@ $("edit-apply").addEventListener("click", async () => {
 });
 
 /* ---------------- price ---------------- */
+// Both sides applies to documents only (an ID card is one sheet).
+function bothSides() {
+  return state.format === "document" && $("both-sides").checked;
+}
 function pageCount() {
   if (state.format !== "document") {
     return (state.sides.front || state.sides.back) ? 1 : 0;
@@ -1057,19 +1112,32 @@ function updatePrice() {
   $("price").textContent = "₹" + total.toFixed(2);
   const nPdf = state.pdfs.length;
   const badPdf = state.pdfs.some(e => e.error);
+  const both = bothSides() && pages > 1;
   $("price-note").textContent = pages
-    ? `${nPdf ? (nPdf > 1 ? nPdf + " PDFs · " : "PDF · ") : ""}` +
+    ? `${nPdf ? (nPdf > 1 ? nPdf + " files · " : "1 file · ") : ""}` +
       `${pages} page${pages > 1 ? "s" : ""}` +
-      ` × ${copies} cop${copies > 1 ? "ies" : "y"}`
-    : (badPdf ? "Fix the page range to continue"
-              : nPdf ? "Reading the PDF…" : "Add a page to see the price");
-  // Block ordering while any PDF has an invalid range.
-  if (badPdf) $("order-btn").disabled = true;
-  $("order-btn").disabled = pages === 0;
-  $("preview-btn").disabled = pages === 0;
+      ` × ${copies} cop${copies > 1 ? "ies" : "y"}` +
+      (both ? " · both sides" : "")
+    : (badPdf ? "Fix the file or page range to continue"
+              : nPdf ? "Reading the file…" : "Add a page to see the price");
+  // Sheets of paper for one copy, so the customer sees what both sides saves.
+  if (state.format === "document" && pages > 1) {
+    const sheets = both ? Math.ceil(pages / 2) : pages;
+    $("sides-note").textContent = both
+      ? `${pages} pages on ${sheets} sheet${sheets > 1 ? "s" : ""} of paper — same price per page.`
+      : "Same price per page, half the paper.";
+  } else {
+    $("sides-note").textContent = pages === 1
+      ? "Your document is a single page, so it prints on one side."
+      : "Same price per page, half the paper.";
+  }
+  // Block ordering while any file is unreadable or has an invalid range.
+  $("order-btn").disabled = pages === 0 || badPdf;
+  $("preview-btn").disabled = pages === 0 || badPdf;
 }
 $("color-mode").addEventListener("change", updatePrice);
 $("copies").addEventListener("input", updatePrice);
+$("both-sides").addEventListener("change", () => { invalidatePreview(); updatePrice(); });
 
 // A stale preview must never be shown after the pages change.
 function invalidatePreview() {
@@ -1090,6 +1158,7 @@ function buildForm() {
   fd.append("color_mode", $("color-mode").value);
   fd.append("copies", $("copies").value || "1");
   fd.append("customer_phone", $("customer-phone").value || "");
+  fd.append("sides", bothSides() ? "double" : "single");
   if (state.format === "document") {
     if (state.pdfs.length) {
       state.pdfs.forEach((e, i) => {

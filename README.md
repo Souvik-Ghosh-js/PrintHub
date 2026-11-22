@@ -118,12 +118,16 @@ cycle is debited by Razorpay itself (no scheduler here). A failed debit arrives
 as `subscription.pending`, then `subscription.halted` once retries are spent.
 
 ## Deliberate v1 simplifications
-- **Autopay** is modeled (renewal amounts, due dates, grace, suspension) and
-  renewals are one-click online payments, but charges are not initiated
-  automatically — a gateway mandate/e-NACH integration slots into
-  `billing.record_renewal_payment` unchanged.
-- Customer page accepts **images** (camera photos); the prototype's PDF-upload
-  path (pdf.js) can be ported into `customer.html` when needed.
+- **Uploads:** the customer page takes camera photos (crop/fix editor) or
+  files of any common type — PDF, Word, Excel, PowerPoint, OpenDocument,
+  RTF, text, images (incl. HEIC). `server/convert.py` turns each into PDF
+  (office files via headless LibreOffice, installed by
+  `deploy/install_converter.sh`), then page ranges and pricing work the same
+  for all.
+- **Both sides:** documents can print double-sided (`print_jobs.sides =
+  double`); same price per page. With several files, each starts on a fresh
+  sheet (free blank page added). The shop app sets the printer's duplex
+  mode and warns if the printer has no duplex unit.
 - The spec's "mobile application" ships here as a mobile-friendly web app; the
   scanning endpoints (`/api/detect_document`, `/api/enhance_page`) are already
   API-shaped for a future native app, and `docs/HANDOFF_FOR_APP_DEVELOPER.md`

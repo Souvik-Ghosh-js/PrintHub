@@ -30,6 +30,7 @@ import config
 import db
 import razorpay_pg as rzp
 import docscan
+import convert
 
 app = Flask(__name__)
 app.secret_key = config.SECRET_KEY
@@ -412,7 +413,7 @@ def build_document_pdf(files, enhance_mode):
 
 MAX_IMAGE_PAGES = 10          # customer may attach up to 10 photos
 MAX_PDF_PAGES = 100           # sanity cap per uploaded PDF
-MAX_PDFS = 5                  # how many PDFs one order may contain
+MAX_FILES = 10                # how many files (PDF/Word/Excel/images/...) per order
 MAX_TOTAL_PAGES = 200         # total printed pages in a single order
 
 
@@ -456,7 +457,7 @@ def parse_page_range(spec: str, total: int):
                 raise ValueError(f"'{part}': the first page must not be "
                                  f"after the last")
             if b > total:
-                raise ValueError(f"'{part}': this PDF only has {total} pages")
+                raise ValueError(f"'{part}': this file only has {total} pages")
             pages.extend(range(a, b + 1))
         else:
             if not part.isdigit():
@@ -465,7 +466,7 @@ def parse_page_range(spec: str, total: int):
             if n < 1:
                 raise ValueError("page numbers start at 1")
             if n > total:
-                raise ValueError(f"page {n}: this PDF only has {total} pages")
+                raise ValueError(f"page {n}: this file only has {total} pages")
             pages.append(n)
 
     pages = sorted(set(pages))
@@ -490,17 +491,27 @@ def extract_pdf_pages(data: bytes, pages):
         src.close()
 
 
-def merge_pdfs(parts):
-    """Concatenate several PDFs (bytes) into one, in the given order."""
+def merge_pdfs(parts, double_sided=False):
+    """Concatenate several PDFs (bytes) into one, in the given order.
+
+    double_sided: after every file with an odd number of pages (except the
+    last) add a blank page, so the next file starts on a fresh sheet
+    instead of on the back of the previous one. Blank pages are not
+    charged — the price is counted from the customer's pages only.
+    """
     if len(parts) == 1:
         return parts[0]
     import fitz
     out = fitz.open()
     try:
-        for data in parts:
+        for i, data in enumerate(parts):
             src = fitz.open(stream=data, filetype="pdf")
             try:
                 out.insert_pdf(src)
+                if (double_sided and src.page_count % 2
+                        and i < len(parts) - 1):
+                    last = src[-1].rect
+                    out.new_page(width=last.width, height=last.height)
             finally:
                 src.close()
         return out.tobytes()
@@ -508,23 +519,35 @@ def merge_pdfs(parts):
         out.close()
 
 
-def _collect_pdfs():
-    """Read the uploaded PDFs and their per-file page ranges.
+def _upload_to_pdf(f):
+    """(pdf_bytes, filename) for one uploaded file of any supported type."""
+    data = f.read()
+    if not data:
+        raise ValueError(f"'{f.filename}' is empty")
+    return convert.to_pdf(data, f.filename), f.filename
 
+
+def _double_sided():
+    return request.form.get("sides") == "double"
+
+
+def _collect_pdfs():
+    """Read the uploaded files and their per-file page ranges.
+
+    Any supported type (PDF, Word, Excel, PowerPoint, text, images) is
+    converted to PDF first, so ranges and pricing work the same for all.
     Fields: pdf (repeated) and range_0, range_1, ... matching by index.
     Returns (merged_pdf_bytes, total_pages).
     """
     files = request.files.getlist("pdf")
     if not files:
         return None, 0
-    if len(files) > MAX_PDFS:
-        raise ValueError(f"you can attach at most {MAX_PDFS} PDFs")
+    if len(files) > MAX_FILES:
+        raise ValueError(f"you can attach at most {MAX_FILES} files")
 
     parts, total = [], 0
     for i, f in enumerate(files):
-        data = f.read()
-        if not data[:5].startswith(b"%PDF"):
-            raise ValueError(f"'{f.filename}' is not a valid PDF")
+        data, _ = _upload_to_pdf(f)
         count = _pdf_page_count(data)
         if count < 1:
             raise ValueError(f"'{f.filename}' has no pages")
@@ -543,7 +566,7 @@ def _collect_pdfs():
     if total > MAX_TOTAL_PAGES:
         raise ValueError(f"that is {total} pages; a single order is limited "
                          f"to {MAX_TOTAL_PAGES}")
-    return merge_pdfs(parts), total
+    return merge_pdfs(parts, double_sided=_double_sided()), total
 
 
 def _order_pdf_from_request(doc_format):
@@ -551,7 +574,8 @@ def _order_pdf_from_request(doc_format):
 
     Three shapes are supported:
       * an ID format (aadhaar/pan/voter) -> 1 or 2 cropped sides on one sheet
-      * an uploaded PDF                  -> printed as-is, all pages
+      * uploaded files (PDF, Word, Excel, PowerPoint, text, images)
+                                         -> converted to PDF, chosen pages
       * up to MAX_IMAGE_PAGES photos     -> one A4 page each
     """
     enhance_mode = request.form.get("enhance_mode", "none")
@@ -566,8 +590,9 @@ def _order_pdf_from_request(doc_format):
         layout = config.DOC_FORMATS[doc_format]["layout"]
         return compose_id_pdf(sides, layout, enhance_mode), 1
 
-    # PDFs the customer uploaded: printed as supplied, honouring the page
-    # range chosen for each one, merged into a single print job.
+    # Files the customer uploaded: printed as supplied (office files and
+    # images converted to PDF), honouring the page range chosen for each
+    # one, merged into a single print job.
     if request.files.getlist("pdf"):
         merged, pages = _collect_pdfs()
         if merged:
@@ -584,24 +609,23 @@ def _order_pdf_from_request(doc_format):
 
 @app.route("/shop/<code>/pdf-info", methods=["POST"])
 def shop_pdf_info(code):
-    """Page count for an uploaded PDF so the customer sees the real price
-    before paying. The server is the authority here — the price charged is
-    computed from this same count."""
+    """Page count for an uploaded file (any supported type, converted to
+    PDF) so the customer sees the real price before paying. The server is
+    the authority here — the price charged is computed from this same
+    count, on the same conversion."""
     vendor = billing.refresh_status(db.get_vendor_by_code(code))
     if not billing.has_access(vendor):
         return jsonify({"error": "shop unavailable"}), 404
     f = request.files.get("pdf")
     if not f:
-        return jsonify({"error": "no pdf uploaded"}), 400
-    data = f.read()
-    if not data[:5].startswith(b"%PDF"):
-        return jsonify({"error": "that file is not a valid PDF"}), 400
+        return jsonify({"error": "no file uploaded"}), 400
     try:
+        data, _ = _upload_to_pdf(f)
         pages = _pdf_page_count(data)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     if pages > MAX_PDF_PAGES:
-        return jsonify({"error": f"PDFs are limited to {MAX_PDF_PAGES} pages"}), 400
+        return jsonify({"error": f"files are limited to {MAX_PDF_PAGES} pages"}), 400
     # Validate a page range in the same request when one is supplied, so the
     # customer sees the selected count (and any mistake) immediately.
     spec = request.form.get("range", "all")
@@ -702,6 +726,11 @@ def shop_order(code):
     price = round(per_page * total_pages * copies, 2)
     if price <= 0:
         return jsonify({"error": "Could not price this order."}), 400
+    # Both sides only means something for a document of 2+ pages; an ID
+    # card is one sheet by design. Same price per page either way — the
+    # customer just uses half the paper.
+    sides = ("double" if _double_sided() and doc_format not in config.DOC_FORMATS
+             and total_pages > 1 else "single")
 
     label = config.DOC_FORMATS.get(doc_format, {}).get("label", "Document")
     storage_key = f"{uuid.uuid4().hex}.pdf"
@@ -717,12 +746,14 @@ def shop_order(code):
         "status": "awaiting_payment",   # printed only after payment succeeds
         "total_pages": total_pages,
         "color_mode": color_mode,
+        "sides": sides,
         "copies": copies,
         "price": price,
         "payment_status": "pending",
     })
     db.log_activity("customer", "job_created",
-                    f"job {job_id}: {label}, {color_mode}, x{copies}, ₹{price}",
+                    f"job {job_id}: {label}, {color_mode}, {sides}-sided, "
+                    f"x{copies}, ₹{price}",
                     vendor_id=vendor["id"])
 
     # Razorpay generates the order id; ours becomes the receipt, so the

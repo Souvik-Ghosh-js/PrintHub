@@ -38,6 +38,9 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
   mysql-server nginx python3-venv python3-pip \
   libgl1 libglib2.0-0 curl
 sudo systemctl enable --now mysql
+# LibreOffice (no GUI) + fonts: converts customers' Word/Excel/PowerPoint
+# uploads to PDF. Kept in its own script so redeploy.sh installs it too.
+bash "$APP_DIR/deploy/install_converter.sh"
 
 echo "==> [2/8] Swap (pip installs of opencv/onnxruntime OOM small instances)..."
 if ! swapon --show | grep -q .; then
