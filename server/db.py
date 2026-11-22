@@ -430,6 +430,84 @@ def update_jobs_by_order(order_id, fields):
     return rowcount
 
 
+# Order-table filters on the vendor dashboard -> the statuses each one shows.
+JOB_FILTERS = {
+    "all": None,
+    "printed": ("printed",),
+    "queue": ("confirmed", "printing"),
+    "attention": ("needs_attention",),
+    "unpaid": ("awaiting_payment", "cancelled"),
+}
+
+
+def _job_filter_sql(vendor_id, show):
+    statuses = JOB_FILTERS.get(show)
+    sql, params = " WHERE vendor_id = %s", [vendor_id]
+    if statuses:
+        sql += " AND status IN (" + ", ".join(["%s"] * len(statuses)) + ")"
+        params += list(statuses)
+    return sql, params
+
+
+def list_vendor_jobs(vendor_id, show="all", limit=50, offset=0):
+    """One page of a shop's orders, newest first — every order ever, not
+    just recent ones. Returns (rows, total_matching)."""
+    where, params = _job_filter_sql(vendor_id, show)
+    total = query("SELECT COUNT(*) AS n FROM print_jobs" + where, tuple(params))[0]["n"]
+    rows = query("SELECT * FROM print_jobs" + where +
+                 " ORDER BY id DESC LIMIT %s OFFSET %s",
+                 tuple(params + [limit, offset]))
+    return rows, int(total or 0)
+
+
+# Dashboard periods: key -> (label, length). None = lifetime.
+STAT_PERIODS = [("24h", "24 hours", timedelta(hours=24)),
+                ("7d", "7 days", timedelta(days=7)),
+                ("30d", "1 month", timedelta(days=30)),
+                ("all", "Lifetime", None)]
+
+
+def vendor_job_stats(vendor_id, now=None):
+    """Totals for a shop's dashboard, counted over ALL its orders.
+
+    stats["periods"][key] = {"printed", "pages", "revenue"} for the last
+    24 hours / 7 days / 30 days / lifetime. An order is dated by when it
+    was paid (falling back to when it was placed) — the same clock the
+    app writes paid_at with.
+    """
+    now = now or datetime.now()
+    when = "COALESCE(paid_at, created_at)"
+    cols, params = [], []
+    for key, _, span in STAT_PERIODS:
+        cond = ""
+        if span is not None:
+            cond = f" AND {when} >= %s"
+        cut = [(now - span).strftime("%Y-%m-%d %H:%M:%S")] if span else []
+        cols += [
+            f"SUM(CASE WHEN status = 'printed'{cond} THEN 1 ELSE 0 END) AS printed_{key}",
+            f"SUM(CASE WHEN status = 'printed'{cond} THEN total_pages * copies ELSE 0 END) AS pages_{key}",
+            f"SUM(CASE WHEN payment_status = 'paid'{cond} THEN price ELSE 0 END) AS revenue_{key}",
+        ]
+        params += cut * 3
+    row = query(
+        "SELECT " + ", ".join(cols) + ","
+        " SUM(CASE WHEN status IN ('confirmed', 'printing') THEN 1 ELSE 0 END) AS queued,"
+        " SUM(CASE WHEN status = 'needs_attention' THEN 1 ELSE 0 END) AS attention,"
+        " SUM(CASE WHEN status IN ('awaiting_payment', 'cancelled') THEN 1 ELSE 0 END) AS unpaid,"
+        " COUNT(*) AS total"
+        " FROM print_jobs WHERE vendor_id = %s", tuple(params + [vendor_id]))[0]
+    stats = {k: int(row.get(k) or 0) for k in ("queued", "attention", "unpaid", "total")}
+    stats["periods"] = {
+        key: {"label": label,
+              "printed": int(row.get(f"printed_{key}") or 0),
+              "pages": int(row.get(f"pages_{key}") or 0),
+              "revenue": float(row.get(f"revenue_{key}") or 0)}
+        for key, label, _ in STAT_PERIODS}
+    life = stats["periods"]["all"]
+    stats.update(printed=life["printed"], pages=life["pages"], revenue=life["revenue"])
+    return stats
+
+
 def get_vendor_jobs(vendor_id, status=None, limit=100):
     if status:
         return query(

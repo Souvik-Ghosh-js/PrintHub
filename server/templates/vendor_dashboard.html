@@ -10,6 +10,18 @@
 <style>
   /* cards size to their own content instead of stretching to the tallest */
   .grid2 { align-items: start; }
+  /* period switch above the stat cards, and the order-table filters */
+  .period-tabs, .order-tabs { display: flex; flex-wrap: wrap; gap: .4rem; }
+  .period-tabs { margin-bottom: .6rem; }
+  .order-tabs { margin-bottom: .8rem; }
+  .period-tab, .order-tab { border: 1px solid var(--line); background: var(--surface);
+    color: var(--ink-2); border-radius: 999px; padding: .3rem .8rem; font-size: .8rem;
+    font-weight: 600; cursor: pointer; text-decoration: none; font-family: inherit; }
+  .period-tab.on, .order-tab.on { background: var(--brand-600); border-color: var(--brand-600);
+    color: #fff; }
+  .order-tab span { opacity: .7; font-weight: 500; margin-left: .2rem; }
+  .order-pager { display: flex; justify-content: space-between; align-items: center;
+    gap: .6rem; margin-top: .8rem; }
   .kv-row { display: flex; justify-content: space-between; gap: 1rem;
             padding: .55rem .7rem; background: var(--surface-2);
             border-radius: var(--r-sm); font-size: .875rem; }
@@ -47,13 +59,28 @@
 </div>
 {% endif %}
 
+{# Printed / pages / earned for each period; the tabs swap them in place.
+   Server renders Lifetime, so the numbers are right even without JS. #}
+<div class="period-tabs" role="tablist" aria-label="Period">
+  {% for key, p in stats.periods.items() %}
+  <button type="button" class="period-tab{{ ' on' if key == 'all' }}" data-period="{{ key }}"
+          role="tab" aria-selected="{{ 'true' if key == 'all' else 'false' }}"
+          data-printed="{{ '{:,}'.format(p.printed) }}" data-pages="{{ '{:,}'.format(p.pages) }}"
+          data-revenue="₹{{ '{:,.0f}'.format(p.revenue) }}"
+          data-when="{{ 'all time' if key == 'all' else 'last ' ~ p.label }}">{{ p.label }}</button>
+  {% endfor %}
+</div>
 <div class="stats" style="margin-bottom:1rem;">
   <div class="stat"><div class="stat-label">Jobs printed</div>
-    <div class="stat-value">{{ stats.printed }}</div></div>
-  <div class="stat"><div class="stat-label">In queue</div>
-    <div class="stat-value">{{ stats.queued }}</div></div>
+    <div class="stat-value" id="st-printed">{{ '{:,}'.format(stats.printed) }}</div>
+    <div class="muted tiny"><span id="st-pages">{{ '{:,}'.format(stats.pages) }}</span> pages,
+      <span class="st-when">all time</span></div></div>
   <div class="stat"><div class="stat-label">Earned (paid)</div>
-    <div class="stat-value">₹{{ '%.0f'|format(stats.revenue) }}</div></div>
+    <div class="stat-value" id="st-revenue">₹{{ '{:,.0f}'.format(stats.revenue) }}</div>
+    <div class="muted tiny st-when">all time</div></div>
+  <div class="stat"><div class="stat-label">In queue</div>
+    <div class="stat-value">{{ stats.queued }}</div>
+    <div class="muted tiny">{% if stats.attention %}+ {{ stats.attention }} need attention{% else %}right now{% endif %}</div></div>
   <div class="stat"><div class="stat-label">Plan</div>
     <div class="stat-value is-text">{{ plans[vendor.plan].label }}</div></div>
 </div>
@@ -300,8 +327,8 @@
 </div>
 
 <!-- ---------- jobs ---------- -->
-<div class="card">
-  <div class="card-head"><h2>Recent orders</h2>
+<div class="card" id="orders">
+  <div class="card-head"><h2>Orders</h2>
     <form method="post" action="{{ url_for('vendor_recheck_payments') }}"
           style="margin:0;">
       <button type="submit" class="btn btn-ghost btn-sm">Re-check payments</button>
@@ -310,6 +337,16 @@
   <p class="muted tiny" style="margin:-.4rem 0 .8rem;">If a customer paid but
     their job still says &ldquo;awaiting payment&rdquo;, this asks Razorpay
     directly and releases the job to the printer.</p>
+  {% set tabs = [("all", "All", stats.total), ("printed", "Printed", stats.printed),
+                 ("queue", "In queue", stats.queued),
+                 ("attention", "Needs attention", stats.attention),
+                 ("unpaid", "Unpaid / cancelled", stats.unpaid)] %}
+  <div class="order-tabs">
+    {% for key, label, n in tabs %}
+    <a href="{{ url_for('vendor_dashboard', show=key) }}#orders"
+       class="order-tab{{ ' on' if show == key }}">{{ label }} <span>{{ '{:,}'.format(n) }}</span></a>
+    {% endfor %}
+  </div>
   <div class="table-scroll">
     <table>
       <thead><tr><th>#</th><th>Document</th><th>Mode</th><th>Copies</th>
@@ -328,11 +365,24 @@
           <td class="muted tiny">{{ j.created_at }}</td>
         </tr>
       {% else %}
-        <tr><td colspan="7" class="empty">No orders yet — share your QR code to get started.</td></tr>
+        <tr><td colspan="7" class="empty">{{ 'No orders yet — share your QR code to get started.'
+              if show == 'all' else 'No orders here.' }}</td></tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
+  {% if jobs_total > per_page %}
+  <div class="order-pager">
+    {% if page > 1 %}
+    <a class="btn btn-ghost btn-sm" href="{{ url_for('vendor_dashboard', show=show, page=page - 1) }}#orders">← Newer</a>
+    {% else %}<span></span>{% endif %}
+    <span class="muted tiny">{{ (page - 1) * per_page + 1 }}–{{ [page * per_page, jobs_total]|min }}
+      of {{ '{:,}'.format(jobs_total) }} · page {{ page }} of {{ pages_total }}</span>
+    {% if page < pages_total %}
+    <a class="btn btn-ghost btn-sm" href="{{ url_for('vendor_dashboard', show=show, page=page + 1) }}#orders">Older →</a>
+    {% else %}<span></span>{% endif %}
+  </div>
+  {% endif %}
 </div>
 
 <!-- ---------- support ---------- -->
@@ -379,6 +429,29 @@
       btn.textContent = "Copied";
       setTimeout(() => { btn.textContent = was; }, 1400);
     });
+  })();
+
+  // Period switch for the stat cards (24 hours / 7 days / 1 month / Lifetime).
+  (function () {
+    const tabs = document.querySelectorAll(".period-tab");
+    if (!tabs.length) return;
+    function pick(key) {
+      tabs.forEach(t => {
+        const on = t.dataset.period === key;
+        t.classList.toggle("on", on);
+        t.setAttribute("aria-selected", on ? "true" : "false");
+        if (!on) return;
+        document.getElementById("st-printed").textContent = t.dataset.printed;
+        document.getElementById("st-pages").textContent = t.dataset.pages;
+        document.getElementById("st-revenue").textContent = t.dataset.revenue;
+        document.querySelectorAll(".st-when").forEach(el => { el.textContent = t.dataset.when; });
+      });
+      try { localStorage.setItem("ph-stat-period", key); } catch (e) {}
+    }
+    tabs.forEach(t => t.addEventListener("click", () => pick(t.dataset.period)));
+    let saved = null;
+    try { saved = localStorage.getItem("ph-stat-period"); } catch (e) {}
+    if (saved && document.querySelector('.period-tab[data-period="' + saved + '"]')) pick(saved);
   })();
 </script>
 {% endblock %}

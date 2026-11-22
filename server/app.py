@@ -1019,27 +1019,42 @@ def vendor_logout():
     return redirect(url_for("vendor_login"))
 
 
+JOBS_PER_PAGE = 50
+
+
 @app.route("/vendor")
 @vendor_required
 def vendor_dashboard(vendor):
-    jobs = db.get_vendor_jobs(vendor["id"], limit=50)
+    # Totals over ALL the shop's orders (the old cards counted only the
+    # latest 50, so a busy shop saw a fraction of its real numbers).
+    stats = db.vendor_job_stats(vendor["id"])
+    # Every order, a page at a time, optionally filtered by status.
+    show = request.args.get("show", "all")
+    if show not in db.JOB_FILTERS:
+        show = "all"
+    per_page = JOBS_PER_PAGE
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except ValueError:
+        page = 1
+    jobs, jobs_total = db.list_vendor_jobs(vendor["id"], show, per_page,
+                                           (page - 1) * per_page)
+    pages_total = max(1, -(-jobs_total // per_page))
+    if page > pages_total:
+        page = pages_total
+        jobs, jobs_total = db.list_vendor_jobs(vendor["id"], show, per_page,
+                                               (page - 1) * per_page)
     payments = db.list_payments(vendor_id=vendor["id"], limit=20)
     has_gateway = _vendor_gateway_ready(vendor)
     has_prices = float(vendor.get("price_bw") or 0) > 0
-    stats = {
-        "printed": sum(1 for j in jobs if j["status"] == "printed"),
-        "queued": sum(1 for j in jobs
-                      if j["status"] in ("confirmed", "printing")),
-        "attention": sum(1 for j in jobs if j["status"] == "needs_attention"),
-        "revenue": sum(float(j["price"] or 0) for j in jobs
-                       if j.get("payment_status") == "paid"),
-    }
     base = db.PUBLIC_BASE_URL.rstrip("/")
     autopay_status = (vendor.get("autopay_status") or "").lower()
     return render_template(
         "vendor_dashboard.html", vendor=vendor, jobs=jobs, payments=payments,
         plans=config.PLANS, worker_exe=worker_exe_available(),
         has_gateway=has_gateway, has_prices=has_prices, stats=stats,
+        show=show, page=page, pages_total=pages_total, jobs_total=jobs_total,
+        per_page=per_page,
         live=billing.has_access(vendor) and has_gateway and has_prices,
         days_left=billing.days_until_renewal(vendor),
         autopay_on=autopay_status in billing.AUTOPAY_HEALTHY,
