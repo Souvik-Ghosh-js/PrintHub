@@ -20,6 +20,8 @@
   .period-tab.on, .order-tab.on { background: var(--brand-600); border-color: var(--brand-600);
     color: #fff; }
   .order-tab span { opacity: .7; font-weight: 500; margin-left: .2rem; }
+  .duplex-switch { display: flex; align-items: center; gap: .55rem; cursor: pointer; }
+  .duplex-switch input { width: 1.15rem; height: 1.15rem; accent-color: var(--brand-600); }
   .order-pager { display: flex; justify-content: space-between; align-items: center;
     gap: .6rem; margin-top: .8rem; }
   .kv-row { display: flex; justify-content: space-between; gap: 1rem;
@@ -175,6 +177,71 @@
   </div>
 </div>
 
+<!-- ---------- both-sides printing (opt-in) ---------- -->
+{% set chosen = vendor.printer_duplex or '' %}
+{% set chosen_seen = printers | selectattr('name', 'equalto', chosen) | list %}
+<div class="card" id="duplex">
+  <div class="card-head">
+    <h2>Both-sides printing</h2>
+    {% if duplex %}<span class="pill pill-ok">on — customers can choose it</span>
+    {% else %}<span class="pill pill-neutral">off</span>{% endif %}
+  </div>
+  <p class="muted tiny">Let customers print documents on both sides of the
+    paper. Turn it on, choose the printer that prints both sides, and set
+    your price per page for it. Until then, customers only see one-sided
+    printing.</p>
+  <form method="post" action="{{ url_for('vendor_duplex') }}">
+    <label class="duplex-switch">
+      <input type="checkbox" name="duplex_enabled" value="1"
+             {{ 'checked' if vendor.duplex_enabled|int }}>
+      <span><strong>Offer both-sides printing</strong></span>
+    </label>
+
+    <div class="field" style="margin-top:.85rem;">
+      <label for="printer_duplex">Printer for both-sides orders</label>
+      {% if printers %}
+      <select id="printer_duplex" name="printer_duplex">
+        <option value="">— choose a printer —</option>
+        {% for p in printers %}
+        <option value="{{ p.name }}" {{ 'selected' if p.name == chosen }}>{{ p.name }}{{
+          ' — prints both sides' if p.duplex == true else
+          (' — one side only (as reported by Windows)' if p.duplex == false else '') }}</option>
+        {% endfor %}
+        {% if chosen and not chosen_seen %}
+        <option value="{{ chosen }}" selected>{{ chosen }} — not found on the shop PC now</option>
+        {% endif %}
+      </select>
+      {% if chosen_seen and chosen_seen[0].duplex == false %}
+      <p class="tiny" style="color:var(--warn); margin:.35rem 0 0;">⚠ Windows says this
+        printer has no both-sides unit. Print a test page before turning this on.</p>
+      {% endif %}
+      {% else %}
+      <input type="hidden" name="printer_duplex" value="{{ chosen }}">
+      <p class="muted tiny" style="margin:.2rem 0 0;">Your printers appear here
+        once the <strong>latest PrintHub app</strong> is running on your shop PC
+        (download it below and sign in).</p>
+      {% endif %}
+    </div>
+
+    <div class="field-row" style="margin-top:.85rem;">
+      <div class="field">
+        <label for="price_bw_duplex">Both sides, Black &amp; White (₹ per page)</label>
+        <input type="number" id="price_bw_duplex" name="price_bw_duplex" step="0.5" min="0"
+               value="{{ '%.2f'|format(vendor.price_bw_duplex or 0) }}">
+      </div>
+      <div class="field">
+        <label for="price_colour_duplex">Both sides, Colour (₹ per page)</label>
+        <input type="number" id="price_colour_duplex" name="price_colour_duplex" step="0.5" min="0"
+               value="{{ '%.2f'|format(vendor.price_colour_duplex or 0) }}">
+      </div>
+    </div>
+    <p class="muted tiny" style="margin:.4rem 0 0;">Charged per printed page —
+      one sheet printed on both sides is 2 pages. Leave Colour at 0 to offer
+      both sides in Black &amp; White only.</p>
+    <button type="submit" class="btn btn-primary" style="margin-top:.9rem;">Save both-sides settings</button>
+  </form>
+</div>
+
 <!-- ---------- worker app + printers ---------- -->
 <div class="grid2">
   <div class="card">
@@ -205,6 +272,11 @@
       <div class="kv-row"><span class="k">Printer</span>
         <span class="v">{{ vendor.printer_single or '— not set —' }}<br>
           <span class="muted tiny">tray: {{ vendor.tray_single or 'auto' }}</span></span></div>
+    {% endif %}
+    {% if duplex %}
+      <div class="kv-row"><span class="k">Both sides</span>
+        <span class="v">{{ duplex.printer }}<br>
+          <span class="muted tiny">set in Both-sides printing above</span></span></div>
     {% endif %}
     <p class="muted tiny" style="margin-top:.7rem;">Change these in the shop PC
       app — “Save / Change Printer” updates this instantly.</p>

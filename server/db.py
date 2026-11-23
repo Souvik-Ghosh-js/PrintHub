@@ -89,6 +89,10 @@ CREATE TABLE IF NOT EXISTS vendors (
     autopay_subscription_id TEXT, autopay_status TEXT,
     autopay_next_charge TEXT, autopay_plan_id TEXT,
     last_billing_email TEXT,
+    duplex_enabled INTEGER NOT NULL DEFAULT 0, printer_duplex TEXT,
+    price_bw_duplex REAL NOT NULL DEFAULT 0,
+    price_colour_duplex REAL NOT NULL DEFAULT 0,
+    printers_seen TEXT, printers_seen_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS payments (
@@ -150,6 +154,12 @@ _SQLITE_MIGRATIONS = [
     "ALTER TABLE vendors ADD COLUMN razorpay_webhook_secret TEXT",
     "ALTER TABLE vendors ADD COLUMN autopay_plan_id TEXT",
     "ALTER TABLE vendors ADD COLUMN last_billing_email TEXT",
+    "ALTER TABLE vendors ADD COLUMN duplex_enabled INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE vendors ADD COLUMN printer_duplex TEXT",
+    "ALTER TABLE vendors ADD COLUMN price_bw_duplex REAL NOT NULL DEFAULT 0",
+    "ALTER TABLE vendors ADD COLUMN price_colour_duplex REAL NOT NULL DEFAULT 0",
+    "ALTER TABLE vendors ADD COLUMN printers_seen TEXT",
+    "ALTER TABLE vendors ADD COLUMN printers_seen_at TEXT",
 ]
 
 

@@ -74,6 +74,15 @@ CREATE TABLE IF NOT EXISTS vendors (
     -- Last billing email sent (e.g. 'reminder:2026-11-28'), so the daily job
     -- sends each reminder at most once.
     last_billing_email      VARCHAR(64),
+    -- Both-sides printing: the shop turns it on, picks the duplex printer
+    -- and sets its own both-sides prices (colour 0 = B/W only).
+    duplex_enabled          TINYINT(1)    NOT NULL DEFAULT 0,
+    printer_duplex          VARCHAR(255),
+    price_bw_duplex         DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    price_colour_duplex     DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    -- Printers the shop app last reported: JSON [{"name", "duplex"}]
+    printers_seen           TEXT,
+    printers_seen_at        DATETIME,
 
     created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),

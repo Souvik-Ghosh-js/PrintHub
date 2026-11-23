@@ -134,6 +134,7 @@
     padding: .75rem .85rem; border: 1px solid var(--line); border-radius: var(--r-sm);
     cursor: pointer; user-select: none; }
   .sides-toggle[hidden] { display: none; }
+  .sides-toggle.is-off { cursor: not-allowed; opacity: .6; }
   .sides-toggle input { position: absolute; opacity: 0; width: 1px; height: 1px; }
   .sides-track { flex: none; position: relative; width: 44px; height: 26px;
     border-radius: 13px; background: var(--line); transition: background .15s; }
@@ -311,15 +312,18 @@
       <input type="tel" id="customer-phone" inputmode="numeric" placeholder="10-digit number">
     </div>
   </div>
-  <!-- documents only: an ID card is a single sheet by design -->
+  {% if duplex %}
+  <!-- only for shops that turned it on in their portal; documents only (an
+       ID card is a single sheet by design) -->
   <label class="sides-toggle" id="sides-row" for="both-sides" hidden>
     <input type="checkbox" id="both-sides">
     <span class="sides-track" aria-hidden="true"></span>
     <span class="sides-text">
       <strong>Print on both sides of the paper</strong>
-      <span class="muted tiny" id="sides-note">Same price per page, half the paper.</span>
+      <span class="muted tiny" id="sides-note"></span>
     </span>
   </label>
+  {% endif %}
 </div>
 
 <div class="summary">
@@ -438,6 +442,8 @@
 {% block scripts %}
 <script>
 const PRICES = { bw: {{ vendor.price_bw }}, color: {{ vendor.price_colour }} };
+// Both-sides per-page prices, or null when this shop doesn't offer it.
+const DUPLEX = {{ ({"bw": duplex.bw, "color": duplex.color} if duplex else None)|tojson }};
 const SHOP = "{{ vendor.shop_code }}";
 
 const state = { format: "aadhaar", layout: "side_by_side",
@@ -454,7 +460,7 @@ fmtBtns.forEach(btn => btn.addEventListener("click", () => {
   const isDoc = state.format === "document";
   $("id-panel").hidden = isDoc;
   $("doc-panel").hidden = !isDoc;
-  $("sides-row").hidden = !isDoc;
+  if (DUPLEX) $("sides-row").hidden = !isDoc;
   if (isDoc) renderDocPanel();
   $("id-slots").classList.toggle("stacked", state.layout === "stacked");
   $("layout-note").textContent = isDoc ? ""
@@ -1089,9 +1095,21 @@ $("edit-apply").addEventListener("click", async () => {
 });
 
 /* ---------------- price ---------------- */
-// Both sides applies to documents only (an ID card is one sheet).
+// Both sides: only when this shop offers it (DUPLEX set), for documents
+// (an ID card is one sheet), and in colour only if the shop priced colour.
+function duplexColourOk() {
+  return !!DUPLEX && ($("color-mode").value !== "color" || DUPLEX.color > 0);
+}
 function bothSides() {
-  return state.format === "document" && $("both-sides").checked;
+  return !!DUPLEX && state.format === "document" && $("both-sides").checked
+         && duplexColourOk();
+}
+function perPage(mode, both) {
+  return both ? DUPLEX[mode] : PRICES[mode];
+}
+// A declaration (hoisted): updatePrice() runs before this line on page load.
+function money(n) {
+  return "₹" + (Math.round(n * 100) / 100).toFixed(2).replace(/\.00$/, "");
 }
 function pageCount() {
   if (state.format !== "document") {
@@ -1108,11 +1126,11 @@ function updatePrice() {
   const mode = $("color-mode").value;
   const copies = Math.max(1, +$("copies").value || 1);
   const pages = pageCount();
-  const total = PRICES[mode] * pages * copies;
+  const both = bothSides() && pages > 1;
+  const total = perPage(mode, both) * pages * copies;
   $("price").textContent = "₹" + total.toFixed(2);
   const nPdf = state.pdfs.length;
   const badPdf = state.pdfs.some(e => e.error);
-  const both = bothSides() && pages > 1;
   $("price-note").textContent = pages
     ? `${nPdf ? (nPdf > 1 ? nPdf + " files · " : "1 file · ") : ""}` +
       `${pages} page${pages > 1 ? "s" : ""}` +
@@ -1120,24 +1138,37 @@ function updatePrice() {
       (both ? " · both sides" : "")
     : (badPdf ? "Fix the file or page range to continue"
               : nPdf ? "Reading the file…" : "Add a page to see the price");
-  // Sheets of paper for one copy, so the customer sees what both sides saves.
-  if (state.format === "document" && pages > 1) {
-    const sheets = both ? Math.ceil(pages / 2) : pages;
-    $("sides-note").textContent = both
-      ? `${pages} pages on ${sheets} sheet${sheets > 1 ? "s" : ""} of paper — same price per page.`
-      : "Same price per page, half the paper.";
-  } else {
-    $("sides-note").textContent = pages === 1
-      ? "Your document is a single page, so it prints on one side."
-      : "Same price per page, half the paper.";
+  if (DUPLEX) {
+    // Colour both-sides only where the shop priced it.
+    const colourOk = duplexColourOk();
+    $("both-sides").disabled = !colourOk;
+    $("sides-row").classList.toggle("is-off", !colourOk);
+    const rate = colourOk ? money(DUPLEX[mode]) + "/page" : "";
+    let note;
+    if (!colourOk) {
+      note = "This shop prints both sides in Black & White only.";
+    } else if (pages === 1) {
+      note = "Your document is a single page, so it prints on one side.";
+    } else if (both) {
+      const sheets = Math.ceil(pages / 2);
+      note = `${pages} pages on ${sheets} sheet${sheets > 1 ? "s" : ""} of paper · ${rate}`;
+    } else {
+      note = `${rate} on both sides — half the paper.`;
+    }
+    $("sides-note").textContent = note;
   }
   // Block ordering while any file is unreadable or has an invalid range.
   $("order-btn").disabled = pages === 0 || badPdf;
   $("preview-btn").disabled = pages === 0 || badPdf;
 }
-$("color-mode").addEventListener("change", updatePrice);
+$("color-mode").addEventListener("change", () => {
+  if (DUPLEX && $("both-sides").checked && !duplexColourOk()) invalidatePreview();
+  updatePrice();
+});
 $("copies").addEventListener("input", updatePrice);
-$("both-sides").addEventListener("change", () => { invalidatePreview(); updatePrice(); });
+if (DUPLEX) {
+  $("both-sides").addEventListener("change", () => { invalidatePreview(); updatePrice(); });
+}
 
 // A stale preview must never be shown after the pages change.
 function invalidatePreview() {

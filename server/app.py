@@ -151,7 +151,8 @@ def shop(code):
             f"{vendor['shop_name']} is still finishing setup and can't "
             f"take orders yet. Please ask at the counter.", 503)
     return render_template("customer.html", vendor=vendor,
-                           formats=config.DOC_FORMATS)
+                           formats=config.DOC_FORMATS,
+                           duplex=duplex_offer(vendor))
 
 
 # Canonical short URL — we're the provider, each vendor gets a clean branded
@@ -527,11 +528,43 @@ def _upload_to_pdf(f):
     return convert.to_pdf(data, f.filename), f.filename
 
 
-def _double_sided():
-    return request.form.get("sides") == "double"
+def duplex_offer(vendor):
+    """The both-sides printing this shop offers, or None.
+
+    A shop opts in from its portal: turn it on, choose the printer that
+    prints both sides, and set a both-sides B/W price (colour is optional —
+    0 means both sides is B/W only). Until all of that is in place the
+    option never reaches customers.
+    Returns {"printer", "bw", "color"} with per-page prices.
+    """
+    if not vendor or not int(vendor.get("duplex_enabled") or 0):
+        return None
+    printer = (vendor.get("printer_duplex") or "").strip()
+    bw = float(vendor.get("price_bw_duplex") or 0)
+    if not printer or bw <= 0:
+        return None
+    return {"printer": printer, "bw": bw,
+            "color": float(vendor.get("price_colour_duplex") or 0)}
 
 
-def _collect_pdfs():
+def _wants_double_sided(vendor, doc_format, color_mode):
+    """True if this request asks for both sides AND the shop offers it for
+    this colour mode. Raises ValueError when asked for but not offered, so
+    the customer is never charged a both-sides price for a one-sided print
+    (or the reverse)."""
+    if request.form.get("sides") != "double" or doc_format in config.DOC_FORMATS:
+        return False                  # ID cards are one sheet by design
+    offer = duplex_offer(vendor)
+    if not offer:
+        raise ValueError("This shop doesn't offer both-sides printing right "
+                         "now. Please refresh the page.")
+    if color_mode == "color" and offer["color"] <= 0:
+        raise ValueError("This shop prints both sides in Black & White only. "
+                         "Switch to B/W or turn off both sides.")
+    return True
+
+
+def _collect_pdfs(double_sided=False):
     """Read the uploaded files and their per-file page ranges.
 
     Any supported type (PDF, Word, Excel, PowerPoint, text, images) is
@@ -566,10 +599,10 @@ def _collect_pdfs():
     if total > MAX_TOTAL_PAGES:
         raise ValueError(f"that is {total} pages; a single order is limited "
                          f"to {MAX_TOTAL_PAGES}")
-    return merge_pdfs(parts, double_sided=_double_sided()), total
+    return merge_pdfs(parts, double_sided=double_sided), total
 
 
-def _order_pdf_from_request(doc_format):
+def _order_pdf_from_request(doc_format, double_sided=False):
     """Build the order PDF + page count from the uploaded form files.
 
     Three shapes are supported:
@@ -594,7 +627,7 @@ def _order_pdf_from_request(doc_format):
     # images converted to PDF), honouring the page range chosen for each
     # one, merged into a single print job.
     if request.files.getlist("pdf"):
-        merged, pages = _collect_pdfs()
+        merged, pages = _collect_pdfs(double_sided)
         if merged:
             return merged, pages
 
@@ -665,9 +698,11 @@ def shop_preview(code):
     vendor = billing.refresh_status(db.get_vendor_by_code(code))
     if not billing.has_access(vendor):
         return jsonify({"error": "shop unavailable"}), 404
+    doc_format = request.form.get("doc_format", "document")
     try:
-        pdf_bytes, total_pages = _order_pdf_from_request(
-            request.form.get("doc_format", "document"))
+        double = _wants_double_sided(vendor, doc_format,
+                                     request.form.get("color_mode", "bw"))
+        pdf_bytes, total_pages = _order_pdf_from_request(doc_format, double)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
@@ -712,25 +747,30 @@ def shop_order(code):
     customer_name = request.form.get("customer_name", "")[:250]
     customer_phone = re.sub(r"\D", "", request.form.get("customer_phone", ""))[:15]
 
-    per_page = float(vendor["price_colour"] if color_mode == "color"
-                     else vendor["price_bw"])
-    if per_page <= 0:
+    if float(vendor["price_colour"] if color_mode == "color"
+             else vendor["price_bw"]) <= 0:
         return jsonify({"error": "This shop has not set its prices yet. "
                                  "Please ask at the counter."}), 503
 
     try:
-        pdf_bytes, total_pages = _order_pdf_from_request(doc_format)
+        double = _wants_double_sided(vendor, doc_format, color_mode)
+        pdf_bytes, total_pages = _order_pdf_from_request(doc_format, double)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
+    # Both sides only means something for a document of 2+ pages; a single
+    # page prints (and is charged) one-sided. A both-sides order is charged
+    # the shop's own both-sides price per page.
+    sides = "double" if double and total_pages > 1 else "single"
+    if sides == "double":
+        offer = duplex_offer(vendor)
+        per_page = offer["color"] if color_mode == "color" else offer["bw"]
+    else:
+        per_page = float(vendor["price_colour"] if color_mode == "color"
+                         else vendor["price_bw"])
     price = round(per_page * total_pages * copies, 2)
     if price <= 0:
         return jsonify({"error": "Could not price this order."}), 400
-    # Both sides only means something for a document of 2+ pages; an ID
-    # card is one sheet by design. Same price per page either way — the
-    # customer just uses half the paper.
-    sides = ("double" if _double_sided() and doc_format not in config.DOC_FORMATS
-             and total_pages > 1 else "single")
 
     label = config.DOC_FORMATS.get(doc_format, {}).get("label", "Document")
     storage_key = f"{uuid.uuid4().hex}.pdf"
@@ -1055,6 +1095,7 @@ def vendor_dashboard(vendor):
         has_gateway=has_gateway, has_prices=has_prices, stats=stats,
         show=show, page=page, pages_total=pages_total, jobs_total=jobs_total,
         per_page=per_page,
+        duplex=duplex_offer(vendor), printers=printers_seen(vendor),
         live=billing.has_access(vendor) and has_gateway and has_prices,
         days_left=billing.days_until_renewal(vendor),
         autopay_on=autopay_status in billing.AUTOPAY_HEALTHY,
@@ -1110,6 +1151,48 @@ def vendor_pricing(vendor):
                     vendor_id=vendor["id"])
     flash("Prices updated.")
     return redirect(url_for("vendor_dashboard"))
+
+
+@app.route("/vendor/duplex", methods=["POST"])
+@vendor_required
+def vendor_duplex(vendor):
+    """Both-sides printing: the shop turns it on, picks the printer that
+    prints both sides and sets its both-sides prices. Customers only see
+    the option once all three are in place (see duplex_offer)."""
+    enabled = request.form.get("duplex_enabled") == "1"
+    printer = (request.form.get("printer_duplex") or "").strip()[:250]
+    try:
+        bw = round(float(request.form.get("price_bw_duplex") or 0), 2)
+        colour = round(float(request.form.get("price_colour_duplex") or 0), 2)
+        if bw < 0 or colour < 0:
+            raise ValueError
+    except ValueError:
+        flash("Both-sides prices must be non-negative numbers.")
+        return redirect(url_for("vendor_dashboard") + "#duplex")
+
+    known = [p["name"] for p in printers_seen(vendor)]
+    if printer and known and printer not in known:
+        flash("That printer is not on your shop PC's list. Pick one from the list.")
+        return redirect(url_for("vendor_dashboard") + "#duplex")
+    if enabled and not printer:
+        flash("Choose the printer that prints both sides before turning it on.")
+        enabled = False
+    elif enabled and bw <= 0:
+        flash("Set a both-sides Black & White price before turning it on.")
+        enabled = False
+
+    db.update_vendor(vendor["id"], {
+        "duplex_enabled": 1 if enabled else 0, "printer_duplex": printer or None,
+        "price_bw_duplex": bw, "price_colour_duplex": colour})
+    db.log_activity("vendor", "duplex_changed",
+                    f"{'on' if enabled else 'off'}, printer {printer or '-'}, "
+                    f"B/W ₹{bw}, Colour ₹{colour}", vendor_id=vendor["id"])
+    if enabled:
+        flash("Both-sides printing is on — customers can now choose it."
+              + ("" if colour > 0 else " (Black & White only: no colour price set.)"))
+    elif request.form.get("duplex_enabled") != "1":
+        flash("Both-sides printing is off — customers print one side only.")
+    return redirect(url_for("vendor_dashboard") + "#duplex")
 
 
 @app.route("/vendor/razorpay", methods=["POST"])
@@ -1570,7 +1653,38 @@ def platform_payment_webhook():
 def _printer_config(vendor):
     return {k: vendor.get(k) for k in (
         "printer_mode", "printer_single", "tray_single",
-        "printer_bw", "tray_bw", "printer_colour", "tray_colour")}
+        "printer_bw", "tray_bw", "printer_colour", "tray_colour",
+        "printer_duplex")}
+
+
+def printers_seen(vendor):
+    """Printers the shop app last reported: [{"name", "duplex"}]."""
+    try:
+        items = json.loads(vendor.get("printers_seen") or "[]")
+        return [p for p in items if isinstance(p, dict) and p.get("name")]
+    except (TypeError, ValueError):
+        return []
+
+
+@app.route("/worker/api/printers", methods=["POST"])
+def worker_report_printers():
+    """The shop app reports the PC's printers (and which can print both
+    sides) so the shop can pick its both-sides printer in the portal."""
+    vendor = worker_vendor()
+    if not vendor:
+        return jsonify({"error": "forbidden"}), 403
+    data = request.get_json(silent=True) or {}
+    items = []
+    for p in (data.get("printers") or [])[:30]:
+        name = str((p or {}).get("name") or "").strip()[:250]
+        if name:
+            duplex = p.get("duplex")
+            items.append({"name": name,
+                          "duplex": None if duplex is None else bool(duplex)})
+    db.update_vendor(vendor["id"], {
+        "printers_seen": json.dumps(items),
+        "printers_seen_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+    return jsonify({"status": "ok", "count": len(items)})
 
 
 @app.route("/worker/api/login", methods=["POST"])
@@ -1629,6 +1743,10 @@ def worker_jobs():
             continue                      # another poll already took it
         j["created_at"] = str(j.get("created_at"))
         j["price"] = float(j.get("price") or 0)
+        # Both-sides orders go to the printer the shop chose for them in its
+        # portal (the shop app prefers this over its own B/W/colour routing).
+        if j.get("sides") == "double" and vendor.get("printer_duplex"):
+            j["printer_target"] = vendor["printer_duplex"]
         out.append(j)
     # shop_name lets the worker resume a saved session without re-login.
     return jsonify({"jobs": out,

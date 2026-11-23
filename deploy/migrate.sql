@@ -48,6 +48,14 @@ CALL ph_add_column('vendors', 'autopay_plan_id',         'VARCHAR(128)');
 -- Billing reminder emails (dedupe key of the last one sent)
 CALL ph_add_column('vendors', 'last_billing_email',      'VARCHAR(64)');
 
+-- Both-sides printing (opt-in per shop, own printer + prices)
+CALL ph_add_column('vendors', 'duplex_enabled',      'TINYINT(1) NOT NULL DEFAULT 0');
+CALL ph_add_column('vendors', 'printer_duplex',      'VARCHAR(255)');
+CALL ph_add_column('vendors', 'price_bw_duplex',     'DECIMAL(10,2) NOT NULL DEFAULT 0.00');
+CALL ph_add_column('vendors', 'price_colour_duplex', 'DECIMAL(10,2) NOT NULL DEFAULT 0.00');
+CALL ph_add_column('vendors', 'printers_seen',       'TEXT');
+CALL ph_add_column('vendors', 'printers_seen_at',    'DATETIME');
+
 -- Online payment tracking on print jobs
 CALL ph_add_column('print_jobs', 'order_id',       'VARCHAR(128)');
 CALL ph_add_column('print_jobs', 'transaction_id', 'VARCHAR(128)');

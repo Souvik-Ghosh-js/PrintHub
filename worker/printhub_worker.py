@@ -88,7 +88,14 @@ class Session:
         self.tray_colour = None
 
     def printer_for_job(self, job):
-        """Print job routing (spec §7.3): pick (printer, tray_name) by mode."""
+        """Print job routing (spec §7.3): pick (printer, tray_name) by mode.
+
+        A both-sides order goes to the printer the shop chose for both-sides
+        printing in its web portal (the server sends it as printer_target).
+        """
+        target = job.get("printer_target")
+        if job.get("sides") == "double" and target:
+            return target, None
         with self.lock:
             if self.mode == "multi":
                 if job.get("color_mode") == "color":
@@ -389,6 +396,22 @@ def api_release_job(job_id, reason=""):
     r.raise_for_status()
 
 
+def api_report_printers():
+    """Tell the server which printers this PC has, and which can print both
+    sides, so the shop can choose its both-sides printer in the portal."""
+    items = []
+    for name in list_printers():
+        items.append({"name": name, "duplex": printer_can_duplex(name)})
+    r = requests.post(f"{SESSION.base_url}/worker/api/printers",
+                      params={"token": SESSION.token},
+                      json={"printers": items}, timeout=30)
+    r.raise_for_status()
+    return len(items)
+
+
+PRINTER_REPORT_EVERY = 30 * 60      # also re-sent at login and on Start
+
+
 def api_save_printer_config():
     with SESSION.lock:
         payload = {
@@ -451,7 +474,15 @@ class WorkerThread(threading.Thread):
     def run(self):
         self.log(f"Connected to {SESSION.base_url} as {SESSION.shop_name}")
         self.log("Watching for jobs...")
+        last_report = 0
         while not self.stop_event.is_set():
+            # Keep the portal's printer list current (new printer plugged in).
+            if time.time() - last_report > PRINTER_REPORT_EVERY:
+                last_report = time.time()
+                try:
+                    api_report_printers()
+                except Exception as e:
+                    self.log(f"⚠️ Could not send the printer list: {e}")
             self._resync_printed()
             try:
                 jobs = api_fetch_jobs()
@@ -845,6 +876,7 @@ class App(tk.Tk):
             SESSION.tray_colour = tray_or_none(self.ct_var.get())
         try:
             api_save_printer_config()
+            api_report_printers()
             self._append_log("🖨 Printer configuration saved and synced to server.")
         except Exception as e:
             self._append_log(f"⚠️ Config saved locally but sync failed: {e}")

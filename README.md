@@ -124,10 +124,15 @@ as `subscription.pending`, then `subscription.halted` once retries are spent.
   (office files via headless LibreOffice, installed by
   `deploy/install_converter.sh`), then page ranges and pricing work the same
   for all.
-- **Both sides:** documents can print double-sided (`print_jobs.sides =
-  double`); same price per page. With several files, each starts on a fresh
-  sheet (free blank page added). The shop app sets the printer's duplex
-  mode and warns if the printer has no duplex unit.
+- **Both sides (opt-in per shop):** in the portal's "Both-sides printing"
+  card the shop turns it on, picks the printer that prints both sides (from
+  the list its shop app reports via `/worker/api/printers`) and sets its own
+  both-sides per-page prices (colour 0 = B/W only). Only then do customers
+  see the switch (`duplex_offer()` in `app.py`); orders are charged the
+  both-sides price and saved as `print_jobs.sides = double`. The job feed
+  sends `printer_target`, and the shop app prints those jobs on that
+  printer in duplex. With several files, each starts on a fresh sheet
+  (free blank page added).
 - The spec's "mobile application" ships here as a mobile-friendly web app; the
   scanning endpoints (`/api/detect_document`, `/api/enhance_page`) are already
   API-shaped for a future native app, and `docs/HANDOFF_FOR_APP_DEVELOPER.md`
