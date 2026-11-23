@@ -56,6 +56,9 @@ CALL ph_add_column('vendors', 'price_colour_duplex', 'DECIMAL(10,2) NOT NULL DEF
 CALL ph_add_column('vendors', 'printers_seen',       'TEXT');
 CALL ph_add_column('vendors', 'printers_seen_at',    'DATETIME');
 
+-- Self sign-up (/signup): marks shops that registered themselves
+CALL ph_add_column('vendors', 'signup_source',       'VARCHAR(16)');
+
 -- Online payment tracking on print jobs
 CALL ph_add_column('print_jobs', 'order_id',       'VARCHAR(128)');
 CALL ph_add_column('print_jobs', 'transaction_id', 'VARCHAR(128)');

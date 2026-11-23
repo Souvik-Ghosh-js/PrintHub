@@ -31,6 +31,7 @@ import db
 import razorpay_pg as rzp
 import docscan
 import convert
+import notify
 
 app = Flask(__name__)
 app.secret_key = config.SECRET_KEY
@@ -1029,14 +1030,152 @@ def serve_file(storage_key):
 # ===========================================================================
 # Vendor portal (web)
 # ===========================================================================
+# ===========================================================================
+# Self sign-up: a shop registers itself, pays, and is live — no admin step.
+# The only thing it brings is its OWN Razorpay account (connected after
+# sign-in), which is where its customers' payments go.
+# ===========================================================================
+SHOP_CODE_RE = re.compile(r"[a-z0-9][a-z0-9-]{1,31}")
+EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+_signup_hits = {}                   # ip -> recent sign-up timestamps (per worker)
+SIGNUPS_PER_HOUR = 10
+
+
+def shop_code_problem(code, vendor_id=None):
+    """Why `code` can't be this shop's link, or None if it's free."""
+    if not SHOP_CODE_RE.fullmatch(code or ""):
+        return "use 2–32 letters, digits or hyphens"
+    if code in RESERVED_CODES:
+        return "that name is reserved"
+    other = db.get_vendor_by_code(code)
+    if other and other["id"] != vendor_id:
+        return "already taken"
+    return None
+
+
+def suggest_shop_code(name, vendor_id=None):
+    """A free, readable link from the shop name: 'Mohini Prints' ->
+    'mohini-prints', then 'mohini-prints-2', ... if taken."""
+    base = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")[:24].strip("-")
+    if len(base) < 2:
+        base = "shop"
+    for n in range(1, 60):
+        code = base if n == 1 else f"{base}-{n}"
+        if not shop_code_problem(code, vendor_id):
+            return code
+    return f"{base}-{uuid.uuid4().hex[:4]}"
+
+
+def _find_vendor_for_login(login, password):
+    """The vendor for a Login ID or an email + password, or None."""
+    if not login or not password:
+        return None
+    candidates = ([db.get_vendor_by_login(login)] if "@" not in login
+                  else db.get_vendors_by_email(login))
+    for v in candidates:
+        if v and v.get("password_hash") and check_password_hash(v["password_hash"], password):
+            return v
+    return None
+
+
+def _signup_rate_ok(ip):
+    now = time.time()
+    hits = [t for t in _signup_hits.get(ip, []) if now - t < 3600]
+    _signup_hits[ip] = hits
+    if len(hits) >= SIGNUPS_PER_HOUR:
+        return False
+    hits.append(now)
+    return True
+
+
+@app.route("/signup", methods=["GET", "POST"])
+def signup():
+    """Public shop registration — the self-service version of the admin's
+    "register vendor". Creates the shop as pending_payment and sends the
+    owner to the onboarding checkout. The first payment activates it and
+    generates the Login ID + password, shown once and emailed with the
+    setup details (see _finalize_subscription_order / _send_welcome)."""
+    plan = request.values.get("plan", "monthly")
+    form = {"plan": plan if plan in config.PLANS else "monthly"}
+    errors = {}
+    if request.method == "POST":
+        f = request.form
+        form = {k: (f.get(k) or "").strip() for k in
+                ("name", "shop_name", "phone", "email", "shop_code", "plan")}
+        form["shop_code"] = form["shop_code"].lower()
+        if f.get("website"):                       # honeypot: bots fill it
+            return redirect(url_for("index"))
+        phone = re.sub(r"\D", "", form["phone"])[-10:]
+        if not form["name"]:
+            errors["name"] = "Enter your name."
+        if not form["shop_name"]:
+            errors["shop_name"] = "Enter your shop's name."
+        if not re.fullmatch(r"[6-9]\d{9}", phone):
+            errors["phone"] = "Enter a 10-digit mobile number."
+        if not EMAIL_RE.fullmatch(form["email"]):
+            errors["email"] = "Enter a valid email — your login details are sent here."
+        if form["plan"] not in config.PLANS:
+            errors["plan"] = "Choose a plan."
+
+        existing = db.get_vendors_by_email(form["email"]) if "email" not in errors else []
+        if any(v["status"] != "pending_payment" for v in existing):
+            errors["email"] = "This email already has a PrintHub shop — sign in instead."
+        # Same email signing up again before paying: continue that sign-up.
+        resume = next((v for v in existing if v["status"] == "pending_payment"), None)
+        rid = resume["id"] if resume else None
+        if not form["shop_code"]:
+            form["shop_code"] = suggest_shop_code(form["shop_name"], rid)
+        problem = shop_code_problem(form["shop_code"], rid)
+        if problem:
+            errors["shop_code"] = f"Shop link: {problem}."
+
+        if not errors and not _signup_rate_ok(request.remote_addr or "?"):
+            errors["form"] = "Too many sign-ups from this connection. Please try later or call us."
+        if not errors:
+            fields = {
+                "name": form["name"][:250], "shop_name": form["shop_name"][:250],
+                "phone": phone, "email": form["email"][:250],
+                "shop_code": form["shop_code"], "plan": form["plan"],
+            }
+            if resume:
+                db.update_vendor(resume["id"], fields)
+                vendor_id = resume["id"]
+            else:
+                vendor_id = db.insert_vendor(dict(fields, status="pending_payment",
+                                                  signup_source="self"))
+            amounts = billing.first_payment(form["plan"])
+            db.log_activity("vendor", "self_registered",
+                            f"{form['shop_name']} ({form['plan']}) signed up; "
+                            f"first payment due ₹{amounts['total']}",
+                            vendor_id=vendor_id)
+            return redirect(url_for("pay_onboard", code=form["shop_code"]))
+
+    base = db.PUBLIC_BASE_URL.rstrip("/")
+    return render_template("signup.html", form=form, errors=errors,
+                           plans=config.PLANS, install_fee=config.INSTALLATION_FEE,
+                           base_url=base, first={k: billing.first_payment(k)["total"]
+                                                 for k in config.PLANS})
+
+
+@app.route("/signup/check-code")
+def signup_check_code():
+    """Live check for the shop-link field on /signup."""
+    code = (request.args.get("code") or "").strip().lower()
+    name = request.args.get("shop_name", "")
+    if not code:
+        return jsonify({"suggestion": suggest_shop_code(name)})
+    problem = shop_code_problem(code)
+    return jsonify({"code": code, "available": problem is None, "problem": problem,
+                    "suggestion": None if problem is None else suggest_shop_code(name or code)})
+
+
 @app.route("/vendor/login", methods=["GET", "POST"])
 def vendor_login():
     if request.method == "POST":
         login_id = request.form.get("login_id", "").strip()
         password = request.form.get("password", "")
-        vendor = db.get_vendor_by_login(login_id)
-        if (vendor and vendor.get("password_hash")
-                and check_password_hash(vendor["password_hash"], password)):
+        vendor = _find_vendor_for_login(login_id, password)
+        if vendor:
             vendor = billing.refresh_status(vendor)
             if vendor["status"] in billing.ADMIN_DISABLED:
                 flash(DISABLED_MESSAGE)
@@ -1046,7 +1185,7 @@ def vendor_login():
                                 vendor_id=vendor["id"])
                 return redirect(url_for("vendor_dashboard"))
         else:
-            flash("Invalid login ID or password.")
+            flash("Wrong login ID / email or password.")
     return render_template("vendor_login.html")
 
 
@@ -1543,6 +1682,22 @@ def vendor_renew_online(vendor):
     return page
 
 
+def _send_welcome(vendor_id, creds):
+    """Email the generated Login ID + password and the setup details when a
+    shop's first payment activates it. Never blocks activation — the same
+    details are also shown once on the payment page."""
+    vendor = db.get_vendor(vendor_id)          # re-read: now active, renews_at set
+    if not vendor or not vendor.get("email"):
+        return
+    try:
+        subject, body = notify.welcome_email(vendor, creds)
+        if notify.send(vendor["email"], subject, body):
+            db.log_activity("system", "email_welcome", f"{subject} -> {vendor['email']}",
+                            vendor_id=vendor["id"])
+    except Exception as e:
+        print(f"[welcome] {e}")
+
+
 def _finalize_subscription_order(order, success, transaction_id=None,
                                  consume_creds=False):
     """Idempotently apply a subscription payment result.
@@ -1567,6 +1722,7 @@ def _finalize_subscription_order(order, success, transaction_id=None,
     if order["purpose"] == "first_payment" and vendor["status"] == "pending_payment":
         creds = billing.record_first_payment(vendor, method="razorpay",
                                              reference=order["order_id"])
+        _send_welcome(vendor["id"], creds)
     elif order["purpose"] == "renewal":
         billing.record_renewal_payment(vendor, method="razorpay",
                                        reference=order["order_id"])

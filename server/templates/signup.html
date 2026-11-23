@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}Register your print shop — PrintHub{% endblock %}
+{% block wrapclass %}wrap-tight{% endblock %}
+{% block nav %}<a href="/">Home</a><a href="{{ url_for('vendor_login') }}">Sign in</a>{% endblock %}
+
+{% block head %}
+<style>
+  .plan-pick { display: grid; gap: .55rem; }
+  .plan-opt { display: flex; align-items: center; gap: .75rem; padding: .8rem .9rem;
+    border: 1.5px solid var(--line); border-radius: var(--r-sm); cursor: pointer;
+    background: var(--surface); }
+  .plan-opt:has(input:checked) { border-color: var(--brand-600); background: var(--brand-50); }
+  .plan-opt input { accent-color: var(--brand-600); width: 1.1rem; height: 1.1rem; flex: none; }
+  .plan-opt .p-name { font-weight: 700; }
+  .plan-opt .p-amt { margin-left: auto; text-align: right; font-weight: 700; }
+  .plan-opt .p-amt small { display: block; font-weight: 500; color: var(--muted); font-size: .72rem; }
+  .err { color: var(--bad); font-size: .78rem; margin-top: .3rem; }
+  .field.has-err input { border-color: var(--bad); }
+  .link-in { display: flex; align-items: stretch; }
+  .link-in .pre { display: flex; align-items: center; padding: 0 .6rem; font-size: .82rem;
+    color: var(--muted); background: var(--surface-2); border: 1px solid var(--line);
+    border-right: 0; border-radius: var(--r-sm) 0 0 var(--r-sm); white-space: nowrap;
+    max-width: 55%; overflow: hidden; text-overflow: ellipsis; }
+  .link-in input { border-radius: 0 var(--r-sm) var(--r-sm) 0; min-width: 0; }
+  .code-ok { color: var(--ok); font-size: .78rem; margin-top: .3rem; }
+  .hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card" style="margin-top:1.5rem;">
+  <h1 style="margin-bottom:.25rem;">Register your print shop</h1>
+  <p class="muted" style="margin-bottom:1rem;">Fill this in and pay. Your
+    <strong>Login ID and password</strong> are created the moment payment
+    succeeds — shown on screen and emailed to you with everything you need
+    to get started.</p>
+
+  <div class="note note-info" style="margin-bottom:1.1rem;">
+    <strong>You'll need your own Razorpay account.</strong> Your customers pay
+    straight into it — PrintHub never holds your money. No account yet?
+    Create one free at <a href="https://razorpay.com" target="_blank" rel="noopener">razorpay.com</a>;
+    you connect it from your dashboard after signing up.
+  </div>
+
+  {% if errors.form %}<div class="note note-bad" style="margin-bottom:1rem;">{{ errors.form }}</div>{% endif %}
+
+  <form method="post" action="{{ url_for('signup') }}" novalidate id="signup-form">
+    <div class="field">
+      <label>Choose your plan</label>
+      <div class="plan-pick">
+        {% for key, p in plans.items() %}
+        <label class="plan-opt">
+          <input type="radio" name="plan" value="{{ key }}" data-total="{{ first[key] }}"
+                 {{ 'checked' if form.plan == key }}>
+          <span><span class="p-name">{{ p.label }}</span><br>
+            <span class="muted tiny">{{ {'monthly': 'billed monthly, autopay available',
+                                         'yearly': 'one payment a year',
+                                         'lifetime': 'one time, no renewals'}[key] }}</span></span>
+          <span class="p-amt">₹{{ '{:,}'.format(p.fee) }}<small>{{ {'monthly': '/month', 'yearly': '/year',
+                                                              'lifetime': 'once'}[key] }}</small></span>
+        </label>
+        {% endfor %}
+      </div>
+      <p class="muted tiny" style="margin:.45rem 0 0;">Plus a one-time setup fee of
+        ₹{{ '{:,}'.format(install_fee) }}.</p>
+    </div>
+
+    <div class="field-row" style="margin-top:1rem;">
+      <div class="field {{ 'has-err' if errors.name }}">
+        <label for="name">Your name</label>
+        <input type="text" id="name" name="name" value="{{ form.name or '' }}" autocomplete="name" required>
+        {% if errors.name %}<div class="err">{{ errors.name }}</div>{% endif %}
+      </div>
+      <div class="field {{ 'has-err' if errors.shop_name }}">
+        <label for="shop_name">Shop name</label>
+        <input type="text" id="shop_name" name="shop_name" value="{{ form.shop_name or '' }}"
+               autocomplete="organization" required>
+        {% if errors.shop_name %}<div class="err">{{ errors.shop_name }}</div>{% endif %}
+      </div>
+    </div>
+    <div class="field-row" style="margin-top:.85rem;">
+      <div class="field {{ 'has-err' if errors.phone }}">
+        <label for="phone">Mobile number</label>
+        <input id="phone" name="phone" type="tel" inputmode="numeric" placeholder="10-digit number"
+               value="{{ form.phone or '' }}" autocomplete="tel" required>
+        {% if errors.phone %}<div class="err">{{ errors.phone }}</div>{% endif %}
+      </div>
+      <div class="field {{ 'has-err' if errors.email }}">
+        <label for="email">Email <span class="muted">(your login is sent here)</span></label>
+        <input id="email" name="email" type="email" value="{{ form.email or '' }}"
+               autocomplete="email" required>
+        {% if errors.email %}<div class="err">{{ errors.email }}
+          {% if 'sign in' in errors.email %}<a href="{{ url_for('vendor_login') }}">Sign in →</a>{% endif %}</div>{% endif %}
+      </div>
+    </div>
+
+    <div class="field {{ 'has-err' if errors.shop_code }}" style="margin-top:.85rem;">
+      <label for="shop_code">Your shop's link <span class="muted">(customers open this from your QR code)</span></label>
+      <div class="link-in">
+        <span class="pre">{{ base_url | replace('https://', '') | replace('http://', '') }}/</span>
+        <input type="text" id="shop_code" name="shop_code" value="{{ form.shop_code or '' }}"
+               placeholder="your-shop" autocapitalize="off" spellcheck="false" maxlength="32">
+      </div>
+      <div id="code-msg">{% if errors.shop_code %}<div class="err">{{ errors.shop_code }}</div>{% endif %}</div>
+    </div>
+
+    <div class="hp" aria-hidden="true"><label>Website <input name="website" tabindex="-1" autocomplete="off"></label></div>
+
+    <button type="submit" class="btn btn-success btn-block btn-lg" style="margin-top:1.2rem;" id="go-btn">
+      Continue to payment — ₹<span id="pay-total">{{ '{:,}'.format(first[form.plan]) }}</span></button>
+    <p class="muted tiny center" style="margin:.6rem 0 0;">Secure payment by Razorpay.
+      Your Login ID and password are emailed to you once payment succeeds.</p>
+  </form>
+</div>
+<p class="muted tiny center" style="margin-top:1rem;">
+  Already registered? <a href="{{ url_for('vendor_login') }}">Sign in</a> ·
+  Questions? {% for c in contact_phones %}<a href="tel:{{ c.tel }}">{{ c.label }}</a>{% if not loop.last %} or {% endif %}{% endfor %}
+</p>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  // Pay-today total follows the chosen plan.
+  document.querySelectorAll('input[name="plan"]').forEach(r => r.addEventListener("change", () => {
+    $("pay-total").textContent = Number(r.dataset.total).toLocaleString("en-IN");
+  }));
+
+  // Shop link: suggested from the shop name until the owner edits it,
+  // and checked for availability as they type.
+  const code = $("shop_code"), name = $("shop_name"), msg = $("code-msg");
+  let edited = code.value !== "", timer = null;
+  function show(html) { msg.innerHTML = html; }
+  async function check() {
+    const q = new URLSearchParams({ code: code.value.trim().toLowerCase(), shop_name: name.value });
+    try {
+      const d = await (await fetch("/signup/check-code?" + q)).json();
+      if (!code.value.trim()) {
+        if (d.suggestion) { code.value = d.suggestion; check(); }
+        return;
+      }
+      if (d.available) show('<div class="code-ok">✓ Available</div>');
+      else {
+        show('<div class="err">' + (d.problem || "not available") + (d.suggestion
+          ? ' — try <a href="#" id="use-sug">' + d.suggestion + '</a>' : '') + '</div>');
+        const a = document.getElementById("use-sug");
+        if (a) a.addEventListener("click", (e) => { e.preventDefault(); code.value = d.suggestion; edited = true; check(); });
+      }
+    } catch (e) { /* offline: the server checks again on submit */ }
+  }
+  code.addEventListener("input", () => {
+    edited = code.value !== "";
+    code.value = code.value.toLowerCase().replace(/[^a-z0-9-]/g, "");
+    clearTimeout(timer); timer = setTimeout(check, 350);
+  });
+  name.addEventListener("input", () => {
+    if (edited) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => { code.value = ""; check(); }, 400);
+  });
+  if (code.value) check();
+
+  $("signup-form").addEventListener("submit", () => {
+    $("go-btn").disabled = true;
+    $("go-btn").textContent = "Starting payment…";
+  });
+})();
+</script>
+{% endblock %}

@@ -9,7 +9,9 @@ Each run:
   2. emails every monthly vendor whose coming month is unpaid (27th..1st),
      and a one-off notice to any vendor just disabled for not paying;
   3. deletes order files older than config.FILE_RETENTION_DAYS (order
-     records stay, only the PDFs on disk go).
+     records stay, only the PDFs on disk go);
+  4. removes self sign-ups never paid for config.ABANDONED_SIGNUP_DAYS,
+     freeing their shop links.
 Safe to run more than once a day: each email is claimed atomically per
 vendor per day (db.claim_billing_email), so nobody is mailed twice.
 """
@@ -52,6 +54,14 @@ def run_daily(dry_run=False, at=None):
             failed += 1
             db.release_billing_email(v["id"], key, previous)
     print(f"[daily] emails sent: {sent}, failed: {failed}")
+
+    if not dry_run:
+        try:
+            gone = db.purge_abandoned_signups(config.ABANDONED_SIGNUP_DAYS)
+            print(f"[daily] removed {len(gone)} unpaid sign-up(s) older than "
+                  f"{config.ABANDONED_SIGNUP_DAYS} days" + (f": {', '.join(gone)}" if gone else ""))
+        except Exception as e:
+            print(f"[daily] sign-up cleanup failed: {e}")
 
     try:
         files, size = db.purge_old_files(config.FILE_RETENTION_DAYS, dry_run)

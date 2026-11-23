@@ -93,6 +93,7 @@ CREATE TABLE IF NOT EXISTS vendors (
     price_bw_duplex REAL NOT NULL DEFAULT 0,
     price_colour_duplex REAL NOT NULL DEFAULT 0,
     printers_seen TEXT, printers_seen_at TEXT,
+    signup_source TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
 );
 CREATE TABLE IF NOT EXISTS payments (
@@ -160,6 +161,7 @@ _SQLITE_MIGRATIONS = [
     "ALTER TABLE vendors ADD COLUMN price_colour_duplex REAL NOT NULL DEFAULT 0",
     "ALTER TABLE vendors ADD COLUMN printers_seen TEXT",
     "ALTER TABLE vendors ADD COLUMN printers_seen_at TEXT",
+    "ALTER TABLE vendors ADD COLUMN signup_source TEXT",
 ]
 
 
@@ -278,8 +280,41 @@ def get_vendor_by_token(worker_token):
     return rows[0] if rows else None
 
 
+def get_vendors_by_email(email):
+    """Every vendor with this email (case-insensitive), newest first."""
+    email = (email or "").strip()
+    if not email:
+        return []
+    return query("SELECT * FROM vendors WHERE LOWER(email) = LOWER(%s) "
+                 "ORDER BY id DESC", (email,))
+
+
 def list_vendors():
     return query("SELECT * FROM vendors ORDER BY created_at DESC")
+
+
+def purge_abandoned_signups(days=7, now=None):
+    """Delete self sign-ups that never paid, so their shop links free up.
+
+    Only rows that are still pending_payment, came from /signup, are older
+    than `days`, have no payment at all, and have no checkout started in
+    the last 2 days (someone may be paying right now). Returns the shop
+    codes removed.
+    """
+    now = now or datetime.now()
+    cut = (now - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    recent = (now - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = query(
+        "SELECT v.id, v.shop_code FROM vendors v"
+        " WHERE v.status = 'pending_payment' AND v.signup_source = 'self'"
+        "   AND v.created_at < %s"
+        "   AND NOT EXISTS (SELECT 1 FROM payments p WHERE p.vendor_id = v.id)"
+        "   AND NOT EXISTS (SELECT 1 FROM gateway_orders g WHERE g.vendor_id = v.id"
+        "                   AND (g.status = 'paid' OR g.created_at >= %s))",
+        (cut, recent))
+    for r in rows:
+        delete_vendor(r["id"])
+    return [r["shop_code"] for r in rows]
 
 
 def delete_vendor(vendor_id):

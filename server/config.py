@@ -77,6 +77,10 @@ BILLING_TZ_OFFSET_MINUTES = 330  # IST, UTC+05:30 (no DST)
 # Order records are always kept — only the file on disk goes.
 FILE_RETENTION_DAYS = 30
 
+# A shop that signs up on /signup but never pays is removed after this many
+# days (by the daily job), so its shop link becomes free again.
+ABANDONED_SIGNUP_DAYS = 7
+
 # --- Outgoing email (billing reminders) over SMTP ---
 # Defaults are the Mohini Print Shop Gmail account (app password), so
 # reminders work after a redeploy with no server-side setup. A non-empty

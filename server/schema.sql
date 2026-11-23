@@ -83,6 +83,8 @@ CREATE TABLE IF NOT EXISTS vendors (
     -- Printers the shop app last reported: JSON [{"name", "duplex"}]
     printers_seen           TEXT,
     printers_seen_at        DATETIME,
+    -- 'self' = signed up on /signup; NULL = registered by the admin.
+    signup_source           VARCHAR(16),
 
     created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),

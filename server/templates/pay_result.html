@@ -12,7 +12,7 @@
 
 {% if creds %}
 <div class="creds" style="margin-top:1rem;">
-  <strong>⚠ Save these now — they are shown only once.</strong>
+  <strong>⚠ Save these now — this page shows them only once.</strong>
   <div class="kv" style="margin-top:.7rem;">
     <div>Login ID<br><code>{{ creds.login_id }}</code></div>
   </div>
@@ -20,7 +20,9 @@
     <div>Password<br><code>{{ creds.password }}</code></div>
   </div>
   <p class="muted tiny" style="margin:.9rem 0 0;">Use them to sign in to your
-    vendor dashboard and to the shop-PC printing app.</p>
+    shop dashboard and to the shop-PC printing app.
+    {% if vendor and vendor.email %}We've also emailed them, with your setup
+    steps, to <strong>{{ vendor.email }}</strong>.{% endif %}</p>
 </div>
 {% endif %}
 

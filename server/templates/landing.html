@@ -7,6 +7,7 @@
   <a href="#pricing">Pricing</a>
   <a href="#contact">Contact</a>
   <a href="{{ url_for('vendor_login') }}">Shop login</a>
+  <a href="{{ url_for('signup') }}">Register</a>
 {% endblock %}
 
 {% block head %}
@@ -198,8 +199,9 @@
   <p class="sub">Stick a QR code on your counter. Customers scan, upload, pay —
     and the job prints itself. No WhatsApp, no pen drives, no copying files.</p>
   <div class="hero-cta">
-    <a class="btn btn-primary btn-lg" href="#pricing">See pricing</a>
-    <a class="btn btn-ghost btn-lg" href="#how">How it works</a>
+    <a class="btn btn-primary btn-lg" href="{{ url_for('signup') }}">Register your shop</a>
+    <a class="btn btn-ghost btn-lg" href="#pricing">See pricing</a>
+
   </div>
   <div class="nowa">
     <span>No WhatsApp</span><span>No pen drive</span><span>No virus risk</span>
@@ -490,7 +492,7 @@
         <li>Autopay — never miss a month</li>
         <li>Cancel any time</li>
       </ul>
-      <a class="btn btn-ghost btn-block" href="#get-started">Get started</a>
+      <a class="btn btn-ghost btn-block" href="{{ url_for('signup', plan='monthly') }}">Get started</a>
     </div>
     <div class="plan best">
       <span class="tag">BEST VALUE</span>
@@ -504,7 +506,7 @@
         <li>Priority support</li>
         <li>Pays for itself, then it's yours</li>
       </ul>
-      <a class="btn btn-primary btn-block" href="#get-started">Get started</a>
+      <a class="btn btn-primary btn-block" href="{{ url_for('signup', plan='lifetime') }}">Get started</a>
     </div>
     <div class="plan">
       <div class="muted tiny" style="font-weight:700;letter-spacing:.06em;">YEARLY</div>
@@ -518,7 +520,7 @@
         <li>One payment a year</li>
         <li>15-day grace on renewal</li>
       </ul>
-      <a class="btn btn-ghost btn-block" href="#get-started">Get started</a>
+      <a class="btn btn-ghost btn-block" href="{{ url_for('signup', plan='yearly') }}">Get started</a>
     </div>
   </div>
   <p class="center muted tiny" style="margin-top:.9rem;">
@@ -535,8 +537,9 @@
   </div>
   <div class="g2">
     <div class="feat"><div class="ico">1️⃣</div><h3>Register &amp; pay</h3>
-      <p>Tell us your shop name and pick a plan. Your login is created
-        automatically the moment payment succeeds.</p></div>
+      <p><a href="{{ url_for('signup') }}">Register online</a> with your
+        shop name and pick a plan. Your login is ready the moment payment
+        succeeds.</p></div>
     <div class="feat"><div class="ico">2️⃣</div><h3>Set your prices</h3>
       <p>Sign in and enter your per-page rate for B/W and colour, and connect
         your Razorpay account so customers can pay you.</p></div>
@@ -640,14 +643,14 @@
   <h2>Turn your counter into a self-service print shop</h2>
   <p>Set up today. Your customers will work it out on their own.</p>
   <div class="btn-row" style="justify-content:center;">
+    <a class="btn btn-light btn-lg" href="{{ url_for('signup') }}">Register your shop</a>
     {% for c in contact_phones %}
-    <a class="btn {{ 'btn-light' if loop.first else 'btn-ghost' }} btn-lg"
-       href="tel:{{ c.tel }}">📞 {{ c.label }}</a>
+    <a class="btn btn-ghost btn-lg" href="tel:{{ c.tel }}">📞 {{ c.label }}</a>
     {% endfor %}
   </div>
   <p style="margin:.9rem 0 0; font-size:.82rem; color:rgba(255,255,255,.8);">
-    Call us to open a shop account — your login and QR code are created as
-    soon as your first payment clears.
+    Register online and pay — your login and QR code are ready the moment
+    your payment clears. You'll just need your own Razorpay account.
     <a href="{{ url_for('vendor_login') }}"
        style="color:#fff; text-decoration:underline;">Already have an account?</a></p>
 </div>

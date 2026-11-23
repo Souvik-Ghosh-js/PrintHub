@@ -57,6 +57,67 @@ def _dashboard_url():
     return f"{db.PUBLIC_BASE_URL.rstrip('/')}/vendor/login"
 
 
+def welcome_email(vendor, creds):
+    """(subject, body) sent once, when a shop's first payment activates it:
+    the generated Login ID + password and everything needed to go live.
+
+    vendor: the row after activation (plan, renews_at, shop_code, ...).
+    creds:  what billing.record_first_payment returned (login_id, password,
+            total, subscription_fee, installation_fee).
+    """
+    brand = config.SMTP_FROM_NAME
+    shop = vendor.get("shop_name") or "your shop"
+    base = db.PUBLIC_BASE_URL.rstrip("/")
+    plan = vendor.get("plan") or "monthly"
+    plan_label = config.PLANS.get(plan, {}).get("label", plan.title())
+    renews = vendor.get("renews_at")
+    if plan == "lifetime" or not renews:
+        renewal = "Lifetime — no renewals."
+    else:
+        import billing                      # MySQL gives a datetime, SQLite text
+        try:
+            due = billing._as_dt(renews)
+        except Exception:
+            due = None
+        when = f"{due.day} {due:%B %Y}" if due else str(renews)[:10]
+        fee = config.PLANS[plan]["fee"]
+        renewal = f"Next payment of ₹{fee:,} is due by {when}."
+        if plan == "monthly":
+            renewal += (f" Turn on autopay in your dashboard and it is paid "
+                        f"automatically on the {config.AUTOPAY_DEBIT_DAY}th.")
+    subject = f"{brand}: welcome — your PrintHub login for {shop}"
+    body = (
+        f"Hello {vendor.get('name') or shop},\n\n"
+        f"Thank you — your payment was received and {shop} is now active on "
+        f"PrintHub.\n\n"
+        f"YOUR LOGIN\n"
+        f"  Login ID : {creds['login_id']}\n"
+        f"  Password : {creds['password']}\n"
+        f"  Sign in  : {_dashboard_url()}\n"
+        f"Use the same Login ID and password in the PrintHub app on your shop "
+        f"PC. Keep them safe and don't share them.\n\n"
+        f"YOUR SUBSCRIPTION\n"
+        f"  Plan     : {plan_label}\n"
+        f"  Paid     : ₹{creds.get('total', 0):,} (₹{creds.get('subscription_fee', 0):,} "
+        f"plan + ₹{creds.get('installation_fee', 0):,} one-time setup)\n"
+        f"  Renewal  : {renewal}\n\n"
+        f"YOUR SHOP PAGE\n"
+        f"  {base}/{vendor.get('shop_code')}\n"
+        f"  Customers open this by scanning your QR code.\n\n"
+        f"GET READY TO TAKE ORDERS\n"
+        f"  1. Connect your own Razorpay account (dashboard → Payments).\n"
+        f"     Your customers pay straight into it; PrintHub takes nothing.\n"
+        f"     No account yet? Create one free at https://razorpay.com,\n"
+        f"     then copy your API Key ID and Key Secret into the dashboard.\n"
+        f"  2. Set your per-page prices for Black & White and Colour.\n"
+        f"  3. Download the PrintHub app from your dashboard onto the PC\n"
+        f"     connected to your printers, sign in, and choose your printers.\n"
+        f"  4. Print your counter QR poster from the dashboard and put it up.\n"
+        f"Your shop starts taking orders once steps 1 and 2 are done.\n"
+    )
+    return subject, body + _signature()
+
+
 def _signature():
     lines = ["", "Regards,", config.SMTP_FROM_NAME]
     phones = ", ".join(p["label"] for p in config.CONTACT_PHONES)
