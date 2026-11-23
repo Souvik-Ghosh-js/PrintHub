@@ -532,10 +532,10 @@ def duplex_offer(vendor):
     """The both-sides printing this shop offers, or None.
 
     A shop opts in from its portal: turn it on, choose the printer that
-    prints both sides, and set a both-sides B/W price (colour is optional —
-    0 means both sides is B/W only). Until all of that is in place the
-    option never reaches customers.
-    Returns {"printer", "bw", "color"} with per-page prices.
+    prints both sides, and set its both-sides price per page. Both sides is
+    Black & White only — there is no colour both-sides printing. Until all
+    of that is in place the option never reaches customers.
+    Returns {"printer", "bw"} (bw = per-page price).
     """
     if not vendor or not int(vendor.get("duplex_enabled") or 0):
         return None
@@ -543,24 +543,22 @@ def duplex_offer(vendor):
     bw = float(vendor.get("price_bw_duplex") or 0)
     if not printer or bw <= 0:
         return None
-    return {"printer": printer, "bw": bw,
-            "color": float(vendor.get("price_colour_duplex") or 0)}
+    return {"printer": printer, "bw": bw}
 
 
 def _wants_double_sided(vendor, doc_format, color_mode):
-    """True if this request asks for both sides AND the shop offers it for
-    this colour mode. Raises ValueError when asked for but not offered, so
-    the customer is never charged a both-sides price for a one-sided print
-    (or the reverse)."""
+    """True if this request asks for both sides AND the shop offers it.
+    Raises ValueError when asked for but not allowed (shop hasn't turned it
+    on, or colour — both sides is B/W only), so the customer is never
+    charged a both-sides price for a one-sided print or the reverse."""
     if request.form.get("sides") != "double" or doc_format in config.DOC_FORMATS:
         return False                  # ID cards are one sheet by design
-    offer = duplex_offer(vendor)
-    if not offer:
+    if not duplex_offer(vendor):
         raise ValueError("This shop doesn't offer both-sides printing right "
                          "now. Please refresh the page.")
-    if color_mode == "color" and offer["color"] <= 0:
-        raise ValueError("This shop prints both sides in Black & White only. "
-                         "Switch to B/W or turn off both sides.")
+    if color_mode == "color":
+        raise ValueError("Both-sides printing is Black & White only. Switch "
+                         "to Black & White or turn off both sides.")
     return True
 
 
@@ -763,8 +761,7 @@ def shop_order(code):
     # the shop's own both-sides price per page.
     sides = "double" if double and total_pages > 1 else "single"
     if sides == "double":
-        offer = duplex_offer(vendor)
-        per_page = offer["color"] if color_mode == "color" else offer["bw"]
+        per_page = duplex_offer(vendor)["bw"]     # both sides is B/W only
     else:
         per_page = float(vendor["price_colour"] if color_mode == "color"
                          else vendor["price_bw"])
@@ -1156,18 +1153,18 @@ def vendor_pricing(vendor):
 @app.route("/vendor/duplex", methods=["POST"])
 @vendor_required
 def vendor_duplex(vendor):
-    """Both-sides printing: the shop turns it on, picks the printer that
-    prints both sides and sets its both-sides prices. Customers only see
-    the option once all three are in place (see duplex_offer)."""
+    """Both-sides printing (Black & White only): the shop turns it on,
+    picks the printer that prints both sides and sets its both-sides price.
+    Customers only see the option once all three are in place (see
+    duplex_offer)."""
     enabled = request.form.get("duplex_enabled") == "1"
     printer = (request.form.get("printer_duplex") or "").strip()[:250]
     try:
         bw = round(float(request.form.get("price_bw_duplex") or 0), 2)
-        colour = round(float(request.form.get("price_colour_duplex") or 0), 2)
-        if bw < 0 or colour < 0:
+        if bw < 0:
             raise ValueError
     except ValueError:
-        flash("Both-sides prices must be non-negative numbers.")
+        flash("The both-sides price must be a non-negative number.")
         return redirect(url_for("vendor_dashboard") + "#duplex")
 
     known = [p["name"] for p in printers_seen(vendor)]
@@ -1178,18 +1175,18 @@ def vendor_duplex(vendor):
         flash("Choose the printer that prints both sides before turning it on.")
         enabled = False
     elif enabled and bw <= 0:
-        flash("Set a both-sides Black & White price before turning it on.")
+        flash("Set the both-sides price per page before turning it on.")
         enabled = False
 
     db.update_vendor(vendor["id"], {
         "duplex_enabled": 1 if enabled else 0, "printer_duplex": printer or None,
-        "price_bw_duplex": bw, "price_colour_duplex": colour})
+        "price_bw_duplex": bw})
     db.log_activity("vendor", "duplex_changed",
                     f"{'on' if enabled else 'off'}, printer {printer or '-'}, "
-                    f"B/W ₹{bw}, Colour ₹{colour}", vendor_id=vendor["id"])
+                    f"B/W ₹{bw}/page", vendor_id=vendor["id"])
     if enabled:
-        flash("Both-sides printing is on — customers can now choose it."
-              + ("" if colour > 0 else " (Black & White only: no colour price set.)"))
+        flash("Both-sides printing is on — customers can now choose it "
+              "(Black & White only).")
     elif request.form.get("duplex_enabled") != "1":
         flash("Both-sides printing is off — customers print one side only.")
     return redirect(url_for("vendor_dashboard") + "#duplex")

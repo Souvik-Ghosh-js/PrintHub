@@ -319,7 +319,7 @@
     <input type="checkbox" id="both-sides">
     <span class="sides-track" aria-hidden="true"></span>
     <span class="sides-text">
-      <strong>Print on both sides of the paper</strong>
+      <strong>Print on both sides of the paper <span class="muted">(Black &amp; White)</span></strong>
       <span class="muted tiny" id="sides-note"></span>
     </span>
   </label>
@@ -442,8 +442,8 @@
 {% block scripts %}
 <script>
 const PRICES = { bw: {{ vendor.price_bw }}, color: {{ vendor.price_colour }} };
-// Both-sides per-page prices, or null when this shop doesn't offer it.
-const DUPLEX = {{ ({"bw": duplex.bw, "color": duplex.color} if duplex else None)|tojson }};
+// Both-sides (B/W only) per-page price, or null when this shop doesn't offer it.
+const DUPLEX = {{ ({"bw": duplex.bw} if duplex else None)|tojson }};
 const SHOP = "{{ vendor.shop_code }}";
 
 const state = { format: "aadhaar", layout: "side_by_side",
@@ -1096,16 +1096,16 @@ $("edit-apply").addEventListener("click", async () => {
 
 /* ---------------- price ---------------- */
 // Both sides: only when this shop offers it (DUPLEX set), for documents
-// (an ID card is one sheet), and in colour only if the shop priced colour.
+// (an ID card is one sheet), and Black & White only — never colour.
 function duplexColourOk() {
-  return !!DUPLEX && ($("color-mode").value !== "color" || DUPLEX.color > 0);
+  return !!DUPLEX && $("color-mode").value !== "color";
 }
 function bothSides() {
   return !!DUPLEX && state.format === "document" && $("both-sides").checked
          && duplexColourOk();
 }
 function perPage(mode, both) {
-  return both ? DUPLEX[mode] : PRICES[mode];
+  return both ? DUPLEX.bw : PRICES[mode];
 }
 // A declaration (hoisted): updatePrice() runs before this line on page load.
 function money(n) {
@@ -1139,14 +1139,14 @@ function updatePrice() {
     : (badPdf ? "Fix the file or page range to continue"
               : nPdf ? "Reading the file…" : "Add a page to see the price");
   if (DUPLEX) {
-    // Colour both-sides only where the shop priced it.
+    // Both sides is Black & White only: greyed out while Colour is chosen.
     const colourOk = duplexColourOk();
     $("both-sides").disabled = !colourOk;
     $("sides-row").classList.toggle("is-off", !colourOk);
-    const rate = colourOk ? money(DUPLEX[mode]) + "/page" : "";
+    const rate = money(DUPLEX.bw) + "/page";
     let note;
     if (!colourOk) {
-      note = "This shop prints both sides in Black & White only.";
+      note = "Both sides is Black & White only — choose Black & White to use it.";
     } else if (pages === 1) {
       note = "Your document is a single page, so it prints on one side.";
     } else if (both) {

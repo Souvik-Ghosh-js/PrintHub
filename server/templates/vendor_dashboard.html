@@ -187,9 +187,10 @@
     {% else %}<span class="pill pill-neutral">off</span>{% endif %}
   </div>
   <p class="muted tiny">Let customers print documents on both sides of the
-    paper. Turn it on, choose the printer that prints both sides, and set
-    your price per page for it. Until then, customers only see one-sided
-    printing.</p>
+    paper, in <strong>Black &amp; White only</strong> (colour always prints on
+    one side). Turn it on, choose the printer that prints both sides, and
+    set your price per page for it. Until then, customers only see
+    one-sided printing.</p>
   <form method="post" action="{{ url_for('vendor_duplex') }}">
     <label class="duplex-switch">
       <input type="checkbox" name="duplex_enabled" value="1"
@@ -223,21 +224,13 @@
       {% endif %}
     </div>
 
-    <div class="field-row" style="margin-top:.85rem;">
-      <div class="field">
-        <label for="price_bw_duplex">Both sides, Black &amp; White (₹ per page)</label>
-        <input type="number" id="price_bw_duplex" name="price_bw_duplex" step="0.5" min="0"
-               value="{{ '%.2f'|format(vendor.price_bw_duplex or 0) }}">
-      </div>
-      <div class="field">
-        <label for="price_colour_duplex">Both sides, Colour (₹ per page)</label>
-        <input type="number" id="price_colour_duplex" name="price_colour_duplex" step="0.5" min="0"
-               value="{{ '%.2f'|format(vendor.price_colour_duplex or 0) }}">
-      </div>
+    <div class="field" style="margin-top:.85rem; max-width:22rem;">
+      <label for="price_bw_duplex">Both-sides price, Black &amp; White (₹ per page)</label>
+      <input type="number" id="price_bw_duplex" name="price_bw_duplex" step="0.5" min="0"
+             value="{{ '%.2f'|format(vendor.price_bw_duplex or 0) }}">
     </div>
     <p class="muted tiny" style="margin:.4rem 0 0;">Charged per printed page —
-      one sheet printed on both sides is 2 pages. Leave Colour at 0 to offer
-      both sides in Black &amp; White only.</p>
+      one sheet printed on both sides is 2 pages.</p>
     <button type="submit" class="btn btn-primary" style="margin-top:.9rem;">Save both-sides settings</button>
   </form>
 </div>

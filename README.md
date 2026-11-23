@@ -127,7 +127,9 @@ as `subscription.pending`, then `subscription.halted` once retries are spent.
 - **Both sides (opt-in per shop):** in the portal's "Both-sides printing"
   card the shop turns it on, picks the printer that prints both sides (from
   the list its shop app reports via `/worker/api/printers`) and sets its own
-  both-sides per-page prices (colour 0 = B/W only). Only then do customers
+  both-sides per-page price. Both sides is **Black & White only** — colour
+  always prints one-sided, and a colour + both-sides order is refused.
+  Only then do customers
   see the switch (`duplex_offer()` in `app.py`); orders are charged the
   both-sides price and saved as `print_jobs.sides = double`. The job feed
   sends `printer_target`, and the shop app prints those jobs on that
