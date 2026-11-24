@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import zipfile
 from pathlib import Path
 
 from PIL import Image, ImageOps
@@ -45,6 +46,48 @@ CACHE_SECONDS = 2 * 3600      # a converted file is reused for the preview + ord
 _WORK = Path(tempfile.gettempdir()) / "printhub-convert"
 
 
+def office_ext_from_content(data):
+    """The office file type from the bytes themselves, or None.
+
+    Needed because a file can arrive without its extension: on Android,
+    picking a Google Slides/Docs/Sheets file hands the browser an exported
+    .pptx/.docx/.xlsx named just "My presentation".
+    """
+    if data[:4] == b"PK\x03\x04":                       # OOXML / OpenDocument
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                names = z.namelist()
+                if "mimetype" in names:
+                    mime = z.read("mimetype").decode("ascii", "ignore")
+                    for key, ext in (("presentation", ".odp"),
+                                     ("spreadsheet", ".ods"), ("text", ".odt")):
+                        if mime.endswith(key):
+                            return ext
+        except Exception:
+            return None
+        for prefix, ext in (("ppt/", ".pptx"), ("word/", ".docx"), ("xl/", ".xlsx")):
+            if any(n.startswith(prefix) for n in names):
+                return ext
+        return None
+    if data[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":   # old .ppt/.doc/.xls
+        for stream, ext in (("PowerPoint Document", ".ppt"),
+                            ("WordDocument", ".doc"), ("Workbook", ".xls"),
+                            ("Book", ".xls")):
+            if stream.encode("utf-16-le") in data:
+                return ext
+        return None
+    if data[:5] == b"{\\rtf":
+        return ".rtf"
+    return None
+
+
+def office_ext(filename, data):
+    """Extension to convert with: the file's own when we know it, else the
+    one its contents show."""
+    ext = os.path.splitext(filename or "")[1].lower()
+    return ext if ext in OFFICE_EXTS else office_ext_from_content(data)
+
+
 def kind_of(filename, data):
     """'pdf' | 'office' | 'image' | None (not printable)."""
     ext = os.path.splitext(filename or "")[1].lower()
@@ -59,7 +102,8 @@ def kind_of(filename, data):
             im.verify()
         return "image"
     except Exception:
-        return None
+        pass
+    return "office" if office_ext_from_content(data) else None
 
 
 def to_pdf(data, filename):
@@ -72,7 +116,7 @@ def to_pdf(data, filename):
     if kind == "image":
         return image_to_pdf(data, name)
     if kind == "office":
-        return office_to_pdf(data, os.path.splitext(name)[1].lower())
+        return office_to_pdf(data, office_ext(name, data))
     raise ValueError(f"'{name}' is not a file we can print. Upload a PDF, "
                      f"Word, Excel, PowerPoint, text or image file.")
 
@@ -191,14 +235,18 @@ def office_to_pdf(data, ext):
                    "--headless", "--norestore", "--nologo", "--nodefault",
                    "--convert-to", "pdf", "--outdir", str(job), str(src)]
             try:
-                subprocess.run(cmd, stdout=subprocess.DEVNULL,
-                               stderr=subprocess.PIPE, timeout=CONVERT_TIMEOUT,
-                               check=False)
+                run = subprocess.run(cmd, stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.PIPE,
+                                     timeout=CONVERT_TIMEOUT, check=False)
             except subprocess.TimeoutExpired:
                 raise ValueError("this file took too long to convert. Please "
                                  "save it as a PDF and upload that.")
             out = job / "document.pdf"
             if not out.exists() or out.stat().st_size == 0:
+                print(f"[convert] LibreOffice gave no PDF for a {ext} "
+                      f"({len(data)} bytes), exit {run.returncode}: "
+                      f"{run.stderr.decode('utf-8', 'replace')[-300:]}",
+                      flush=True)
                 raise ValueError("could not open this file (is it "
                                  "password-protected or damaged?). Please "
                                  "save it as a PDF and upload that.")

@@ -606,7 +606,9 @@ function fileKind(f) {
   if ((f.type || "").startsWith("image/") ||
       ["jpg","jpeg","png","webp","gif","bmp","tif","tiff","heic","heif"].includes(ext)) return "image";
   if (["xls","xlsx","xlsm","ods","csv"].includes(ext)) return "sheet";
-  if (["ppt","pptx","pps","ppsx","odp"].includes(ext)) return "slides";
+  if (["ppt","pptx","pps","ppsx","odp"].includes(ext) ||
+      /presentation|powerpoint/.test(f.type || "")) return "slides";
+  if (/spreadsheet|excel/.test(f.type || "")) return "sheet";
   return "doc";
 }
 const KIND_ICON = { pdf: "📄", image: "🖼️", sheet: "📊",

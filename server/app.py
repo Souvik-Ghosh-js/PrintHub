@@ -20,7 +20,7 @@ from functools import wraps
 
 from flask import (Flask, request, jsonify, render_template, send_file,
                    session, redirect, url_for, flash)
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 from werkzeug.middleware.proxy_fix import ProxyFix
 from PIL import Image
@@ -538,7 +538,14 @@ def _upload_to_pdf(f):
     data = f.read()
     if not data:
         raise ValueError(f"'{f.filename}' is empty")
-    return convert.to_pdf(data, f.filename), f.filename
+    try:
+        return convert.to_pdf(data, f.filename), f.filename
+    except ValueError as e:
+        # The customer sees the message; the log keeps what was tried, so a
+        # shop's "this file won't upload" can be traced afterwards.
+        print(f"[upload] refused {f.filename!r} ({f.mimetype or '?'}, "
+              f"{len(data)} bytes, starts {data[:8].hex()}): {e}", flush=True)
+        raise
 
 
 def duplex_offer(vendor):
@@ -1241,6 +1248,7 @@ def vendor_dashboard(vendor):
     autopay_status = (vendor.get("autopay_status") or "").lower()
     return render_template(
         "vendor_dashboard.html", vendor=vendor, jobs=jobs, payments=payments,
+        pw_msg=session.pop("pw_msg", None),
         plans=config.PLANS, worker_exe=worker_exe_available(),
         has_gateway=has_gateway, has_prices=has_prices, stats=stats,
         show=show, page=page, pages_total=pages_total, jobs_total=jobs_total,
@@ -1301,6 +1309,57 @@ def vendor_pricing(vendor):
                     vendor_id=vendor["id"])
     flash("Prices updated.")
     return redirect(url_for("vendor_dashboard"))
+
+
+PASSWORD_MIN = 8
+
+
+def new_password_problem(vendor, current, new, confirm):
+    """Why this password change can't go ahead, or None."""
+    if not check_password_hash(vendor.get("password_hash") or "", current or ""):
+        return "Your current password is wrong."
+    if len(new or "") < PASSWORD_MIN:
+        return f"The new password must be at least {PASSWORD_MIN} characters."
+    if len(new) > 128:
+        return "The new password is too long (128 characters at most)."
+    if new != confirm:
+        return "The two new passwords don't match."
+    if new == current:
+        return "The new password is the same as the current one."
+    if new.lower() in {(vendor.get("login_id") or "").lower(),
+                       (vendor.get("email") or "").lower(),
+                       (vendor.get("shop_code") or "").lower()}:
+        return "Don't use your Login ID, email or shop link as the password."
+    return None
+
+
+@app.route("/vendor/password", methods=["POST"])
+@vendor_required
+def vendor_password(vendor):
+    """The shop changes its own password (the one PrintHub generated, or a
+    previous change). The shop PC app stays signed in; it only needs the
+    new password if it is ever signed out."""
+    problem = new_password_problem(vendor, request.form.get("current_password"),
+                                   request.form.get("new_password"),
+                                   request.form.get("confirm_password"))
+    # The result shows inside the password card (the page opens scrolled
+    # there), not as a flash at the top where it would be out of view.
+    if problem:
+        session["pw_msg"] = {"ok": False, "text": problem}
+        return redirect(url_for("vendor_dashboard") + "#password")
+    db.update_vendor(vendor["id"], {
+        "password_hash": generate_password_hash(request.form["new_password"])})
+    db.log_activity("vendor", "password_changed", "changed from the dashboard",
+                    vendor_id=vendor["id"])
+    if vendor.get("email"):
+        try:
+            subject, body = notify.password_changed_email(vendor)
+            notify.send(vendor["email"], subject, body)
+        except Exception as e:
+            print(f"[password-email] {e}")
+    session["pw_msg"] = {"ok": True, "text": "Password changed. Use the new "
+                         "one next time you sign in, here or in the shop PC app."}
+    return redirect(url_for("vendor_dashboard") + "#password")
 
 
 @app.route("/vendor/duplex", methods=["POST"])

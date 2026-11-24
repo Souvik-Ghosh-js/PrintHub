@@ -118,6 +118,24 @@ def welcome_email(vendor, creds):
     return subject, body + _signature()
 
 
+def password_changed_email(vendor):
+    """(subject, body) telling the shop its password was just changed, so a
+    change it didn't make doesn't go unnoticed. Never contains the password."""
+    brand = config.SMTP_FROM_NAME
+    shop = vendor.get("shop_name") or "your shop"
+    subject = f"{brand}: the password for {shop} was changed"
+    body = (
+        f"Hello {vendor.get('name') or shop},\n\n"
+        f"The PrintHub password for {shop} (Login ID {vendor.get('login_id')}) "
+        f"was just changed from the shop dashboard.\n\n"
+        f"If you did this, there is nothing else to do — use the new password "
+        f"next time you sign in, on the website or in the shop PC app.\n\n"
+        f"If you did NOT change it, call or WhatsApp us straight away so we "
+        f"can lock the account and give you a new password.\n"
+    )
+    return subject, body + _signature()
+
+
 def _signature():
     lines = ["", "Regards,", config.SMTP_FROM_NAME]
     phones = ", ".join(p["label"] for p in config.CONTACT_PHONES)
