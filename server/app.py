@@ -521,6 +521,18 @@ def merge_pdfs(parts, double_sided=False):
         out.close()
 
 
+def pdf_flip_edge(pdf_bytes):
+    """Which edge a both-sides print flips on, so the back of every sheet
+    reads the right way up: "long" for portrait documents, "short" for
+    landscape ones. A sheet has one flip edge for the whole job, so a
+    document mixing both goes by what most of its pages are (ties ->
+    portrait). page.rect already allows for any /Rotate on the page."""
+    import fitz
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+        wide = sum(1 for p in doc if p.rect.width > p.rect.height)
+        return "short" if wide * 2 > doc.page_count else "long"
+
+
 def _upload_to_pdf(f):
     """(pdf_bytes, filename) for one uploaded file of any supported type."""
     data = f.read()
@@ -769,6 +781,7 @@ def shop_order(code):
     price = round(per_page * total_pages * copies, 2)
     if price <= 0:
         return jsonify({"error": "Could not price this order."}), 400
+    flip_edge = pdf_flip_edge(pdf_bytes) if sides == "double" else None
 
     label = config.DOC_FORMATS.get(doc_format, {}).get("label", "Document")
     storage_key = f"{uuid.uuid4().hex}.pdf"
@@ -785,6 +798,7 @@ def shop_order(code):
         "total_pages": total_pages,
         "color_mode": color_mode,
         "sides": sides,
+        "flip_edge": flip_edge,
         "copies": copies,
         "price": price,
         "payment_status": "pending",
@@ -1900,6 +1914,7 @@ def worker_jobs():
         # portal (the shop app prefers this over its own B/W/colour routing).
         if j.get("sides") == "double" and vendor.get("printer_duplex"):
             j["printer_target"] = vendor["printer_duplex"]
+            j["flip_edge"] = j.get("flip_edge") or "long"
         out.append(j)
     # shop_name lets the worker resume a saved session without re-login.
     return jsonify({"jobs": out,

@@ -58,6 +58,8 @@ CALL ph_add_column('vendors', 'printers_seen_at',    'DATETIME');
 
 -- Self sign-up (/signup): marks shops that registered themselves
 CALL ph_add_column('vendors', 'signup_source',       'VARCHAR(16)');
+-- Both sides: flip on the long edge (portrait) or short edge (landscape)
+CALL ph_add_column('print_jobs', 'flip_edge',        'VARCHAR(8)');
 
 -- Online payment tracking on print jobs
 CALL ph_add_column('print_jobs', 'order_id',       'VARCHAR(128)');

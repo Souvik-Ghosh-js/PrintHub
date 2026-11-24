@@ -134,7 +134,10 @@ as `subscription.pending`, then `subscription.halted` once retries are spent.
   both-sides price and saved as `print_jobs.sides = double`. The job feed
   sends `printer_target`, and the shop app prints those jobs on that
   printer in duplex. With several files, each starts on a fresh sheet
-  (free blank page added).
+  (free blank page added). The flip edge follows the document
+  (`pdf_flip_edge`, stored as `print_jobs.flip_edge`): portrait pages flip
+  on the long edge, landscape pages on the short edge, so the back of each
+  sheet reads the right way up; a mixed document goes by most of its pages.
 - The spec's "mobile application" ships here as a mobile-friendly web app; the
   scanning endpoints (`/api/detect_document`, `/api/enhance_page`) are already
   API-shaped for a future native app, and `docs/HANDOFF_FOR_APP_DEVELOPER.md`

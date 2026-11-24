@@ -197,8 +197,14 @@ def configure_printer_settings(printer, job, tray_name):
     # a "both sides" order on one side.
     devmode.Color = 2 if job.get("color_mode") == "color" else 1
     devmode.Fields |= win32con.DM_COLOR
-    # 2 = DMDUP_VERTICAL: long-edge flip, pages read like a book.
-    devmode.Duplex = 2 if job.get("sides") == "double" else 1
+    # Both sides flips on the edge that keeps the back the right way up:
+    # portrait documents on the long edge (2 = DMDUP_VERTICAL, like a book),
+    # landscape ones on the short edge (3 = DMDUP_HORIZONTAL, like a flip
+    # calendar). The server works out which from the document's pages.
+    if job.get("sides") == "double":
+        devmode.Duplex = 3 if job.get("flip_edge") == "short" else 2
+    else:
+        devmode.Duplex = 1
     devmode.Fields |= win32con.DM_DUPLEX
     devmode.Orientation = 2 if job.get("orientation") == "landscape" else 1
     devmode.Fields |= win32con.DM_ORIENTATION
@@ -932,7 +938,8 @@ class App(tk.Tk):
         self.tree.insert("", 0, values=(
             job.get("id"), job.get("original_filename", ""),
             job.get("color_mode", "") +
-            (" · 2-sided" if job.get("sides") == "double" else ""),
+            ((" · 2-sided, short edge" if job.get("flip_edge") == "short"
+              else " · 2-sided") if job.get("sides") == "double" else ""),
             job.get("copies", 1), status, ts,
         ))
 

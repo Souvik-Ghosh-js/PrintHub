@@ -142,6 +142,7 @@ CREATE TABLE IF NOT EXISTS print_jobs (
         -- awaiting_payment|confirmed|printing|printed|cancelled
     total_pages        INT          DEFAULT 1,
     sides              VARCHAR(16)  DEFAULT 'single',
+    flip_edge          VARCHAR(8),           -- both sides: long (portrait) | short (landscape)
     orientation        VARCHAR(16)  DEFAULT 'portrait',
     color_mode         VARCHAR(16)  DEFAULT 'bw',
     paper_size         VARCHAR(16)  DEFAULT 'A4',
